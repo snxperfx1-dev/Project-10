@@ -279,22 +279,19 @@ f_htfBeliefs(float _open, float _high, float _low, float _close,
     bool  _bearImp   = _eff > _effT and _vel_htf < _vel_htf[1] and _acc_htf < 0 and _close < _open and _disp > _dispT
     int   _dir       = _bullImp ? 1 : _bearImp ? -1 : 0
     float _dispStr   = math.min(_disp / math.max(_dispT, 1e-10), 3.0)
-    int   _structB   = _bullImp ? 1 : _bearImp ? -1 : _dir
 
-    [_dir, _structB, _dispStr, _expScore, _decayScr, _curvScr, _abScr, _liqScr]
+    [_dir, _dispStr, _expScore, _decayScr, _curvScr, _abScr, _liqScr]
 
-[raw_dir_tf1, raw_structB_tf1, raw_disp_tf1, raw_expScr_tf1, raw_decScr_tf1, raw_curvScr_tf1, raw_abScr_tf1, raw_liqScr_tf1] = request.security(syminfo.tickerid, tf1,
+[raw_dir_tf1, raw_disp_tf1, raw_expScr_tf1, raw_decScr_tf1, raw_curvScr_tf1, raw_abScr_tf1, raw_liqScr_tf1] = request.security(syminfo.tickerid, tf1,
     f_htfBeliefs(open, high, low, close, effThresh, dispThresh, acceptBars, convMult, obLookback),
     lookahead=barmerge.lookahead_off)
 
-[raw_dir_tf2, raw_structB_tf2, raw_disp_tf2, raw_expScr_tf2, raw_decScr_tf2, raw_curvScr_tf2, raw_abScr_tf2, raw_liqScr_tf2] = request.security(syminfo.tickerid, tf2,
+[raw_dir_tf2, raw_disp_tf2, raw_expScr_tf2, raw_decScr_tf2, raw_curvScr_tf2, raw_abScr_tf2, raw_liqScr_tf2] = request.security(syminfo.tickerid, tf2,
     f_htfBeliefs(open, high, low, close, effThresh, dispThresh, acceptBars, convMult, obLookback),
     lookahead=barmerge.lookahead_off)
 
 int   dir_tf1     = nz(raw_dir_tf1)
 int   dir_tf2     = nz(raw_dir_tf2)
-int   structB_tf1 = nz(raw_structB_tf1)
-int   structB_tf2 = nz(raw_structB_tf2)
 float expScr_tf1  = nz(raw_expScr_tf1)
 float expScr_tf2  = nz(raw_expScr_tf2)
 float decScr_tf1  = nz(raw_decScr_tf1)
@@ -5868,13 +5865,25 @@ float  tqeGradeC = input.float(42.0, "TQE: C Threshold",  group=GRP_V72_TQE, min
 int    doeCapBase = input.int(88, "DOE: Confidence Cap (base)",        group=GRP_V72_DOE, minval=50, maxval=100)
 int    doeCapConv = input.int(95, "DOE: Confidence Cap (convergence)", group=GRP_V72_DOE, minval=50, maxval=100)
 
-// ── MCE TF3/TF4 belief reads (request.security must be global) ────────────────
-[raw_dir_tf3, raw_structB_tf3, raw_disp_tf3, raw_expScr_tf3, raw_decScr_tf3, raw_curvScr_tf3, raw_abScr_tf3, raw_liqScr_tf3] = request.security(syminfo.tickerid, mce_tf3,
-     f_htfBeliefs(open, high, low, close, effThresh, dispThresh, acceptBars, convMult, obLookback),
-     lookahead=barmerge.lookahead_off)
-[raw_dir_tf4, raw_structB_tf4, raw_disp_tf4, raw_expScr_tf4, raw_decScr_tf4, raw_curvScr_tf4, raw_abScr_tf4, raw_liqScr_tf4] = request.security(syminfo.tickerid, mce_tf4,
-     f_htfBeliefs(open, high, low, close, effThresh, dispThresh, acceptBars, convMult, obLookback),
-     lookahead=barmerge.lookahead_off)
+// ── MCE TF3/TF4 direction reads (single-value to minimize external elements) ──
+// CE limit fix: each request.*() return value counts toward EVERY function's
+// 254 external-element budget. Returning only the structural direction (1 int)
+// instead of the full 8-value belief tuple keeps that global count low while
+// still giving MCE the 4-level direction stack it needs (C15).
+f_htfDir(float _open, float _high, float _low, float _close, float _effT, float _dispT, int _obLook) =>
+    float _atr_htf = ta.atr(atrLen)
+    float _vel_htf = ta.ema(_close - _close[1], 3)
+    float _acc_htf = _vel_htf - _vel_htf[1]
+    float _move    = math.abs(_close - _close[_obLook])
+    float _pathSum = math.sum(math.abs(_close - _close[1]), _obLook)
+    float _eff     = _pathSum > 0 ? _move / _pathSum : 0.0
+    float _disp    = (_high - _low) / math.max(_atr_htf, 1e-10)
+    bool  _bullImp = _eff > _effT and _vel_htf > _vel_htf[1] and _acc_htf > 0 and _close > _open and _disp > _dispT
+    bool  _bearImp = _eff > _effT and _vel_htf < _vel_htf[1] and _acc_htf < 0 and _close < _open and _disp > _dispT
+    _bullImp ? 1 : _bearImp ? -1 : 0
+
+dir_tf3_raw = request.security(syminfo.tickerid, mce_tf3, f_htfDir(open, high, low, close, effThresh, dispThresh, obLookback), lookahead=barmerge.lookahead_off)
+dir_tf4_raw = request.security(syminfo.tickerid, mce_tf4, f_htfDir(open, high, low, close, effThresh, dispThresh, obLookback), lookahead=barmerge.lookahead_off)
 
 // ── Display helper functions (global) ────────────────────────────────────────
 f_v72_px(float _v)  => na(_v) ? "–" : str.tostring(math.round_to_mintick(_v))
@@ -6263,4 +6272,4 @@ f_v72_run(int _dir3, int _dir4) =>
     0
 
 // ── Run the V72 engine once per bar ──────────────────────────────────────────
-f_v72_run(nz(raw_dir_tf3), nz(raw_dir_tf4))
+f_v72_run(nz(dir_tf3_raw), nz(dir_tf4_raw))
