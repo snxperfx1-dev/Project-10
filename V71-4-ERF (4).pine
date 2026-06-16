@@ -1291,6 +1291,29 @@ float erf_dissipationConfidence = math.min(
      (ede_dissipationProgress * 0.50),
      100.0)
 
+// ── V72 ERF INTEGRATION — TRADE READINESS + ENTRY GATE (Phase 1) ─────────────
+// Spec Part 7. Elevates ERF from advisory to decision-influencing. All inputs
+// are existing RE/EAE/ERF outputs computed above (compute order respected:
+// IE1A -> EDE -> RE -> EAE -> ERF -> here). Readiness correction C10: a single
+// tunable threshold replaces the paradoxical UNRESOLVED-dual-branch gate.
+float erfReadyResW   = input.float(0.25, "ERF: Recursive Completion Weight", group=GRP_ERF, minval=0.0, maxval=1.0, step=0.05)
+float erfReadyResidW = input.float(0.20, "ERF: Delivered Energy Weight",     group=GRP_ERF, minval=0.0, maxval=1.0, step=0.05)
+float erfReadyConfW  = input.float(0.15, "ERF: Confidence Weight",           group=GRP_ERF, minval=0.0, maxval=1.0, step=0.05)
+float erfEntryThreshold = input.float(45.0, "ERF: Entry Gate Threshold",     group=GRP_ERF, minval=0.0, maxval=100.0, step=1.0)
+bool  erfGateEnabled    = input.bool(true,  "ERF: Enable Entry Gate on Signals", group=GRP_ERF)
+
+float erf_tradeReadiness = math.min(
+     (re_resolutionState == "RESOLVED"           ? 40.0 :
+      re_resolutionState == "PARTIALLY RESOLVED" ? 25.0 : 10.0) +
+     re_recursiveCompletionScore * erfReadyResW +
+     (100.0 - re_residualEnergyScore) * erfReadyResidW +
+     erf_confidence * erfReadyConfW,
+     100.0)
+
+// Single-threshold gate (C10). erf_tradeReadiness naturally scores low when
+// UNRESOLVED and high when RESOLVED, so one threshold is sufficient and safe.
+bool erf_entryGate = not erfGateEnabled or erf_tradeReadiness >= erfEntryThreshold
+
 // END ENERGY RESOLUTION FRAMEWORK
 // ═══════════════════════════════════════════════════════════════════════════════
 
@@ -2651,14 +2674,16 @@ bool longSignal = showSignals and beliefEntryLong and
      not signalLocked and not withinLongLock and
      edgePassesFilter and
      preConvOK_long and inducOK_long and
-     structLongOK and liqSweepOK and obFresh and htfLongOK
+     structLongOK and liqSweepOK and obFresh and htfLongOK and
+     erf_entryGate
 
 bool shortSignal = showSignals and beliefEntryShort and
      htfAligned and gradeOK and
      not signalLocked and not withinShortLock and
      edgePassesFilter and
      preConvOK_short and inducOK_short and
-     structShortOK and liqSweepOK and obFresh and htfShortOK
+     structShortOK and liqSweepOK and obFresh and htfShortOK and
+     erf_entryGate
 
 if longSignal
     lastSignalBar := bar_index
@@ -5787,3 +5812,774 @@ if showTable and showFRZ_Dashboard and barstate.islast
              text_color=color.white, text_size=_szC)
         table.cell(frz_dash, 4, _rowCursor, frz_ownerLayer,
              text_color=f_frzOwnerColor(frz_ownerLayer), text_size=_szC)
+
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// ███████  V72 DECISION ARCHITECTURE  ███████
+// Appended additively after all V71 computation. Compute order is guaranteed:
+// Physics -> IE1A -> EDE/RE/EAE/ERF -> FRZ scan all execute above this point, so
+// every consumer below reads already-computed, settled values.
+//
+// AUTHORITY: IE1A remains the sole lifecycle authority. Nothing below assigns,
+// modifies, or competes with ie1a_currentPhase. Every engine here is a CONSUMER.
+//
+// This block implements the "Corrected V72 Baseline" from the Implementation
+// Readiness Report (Phase 1 + Phase 2), with all blocking corrections applied:
+//   C1  best-zone top/bot/dir resolved via array index lookup (no phantom vars)
+//   C2  attractor targets directionally validated before assignment
+//   C3  Demand/Supply Return narratives mapped to "Pullback" (not Continuation)
+//   C4  IE1A double-count removed via erf_pureConfidence in TQE
+//   C5  Wave Registry death hook evaluated before respawn (edge detection)
+//   C6  TQE grade is a display label only — it does NOT gate doe_action
+//   C7  attractor convergence promotion is display-only
+//   C8  liveDirective NOT rebranded under RIE
+//   C9  invalidation uses flipBot/flipTop (not geometric approximations)
+//   C10 ERF entry gate uses a single tunable threshold
+//   C11 MCE lifecycle-progress score is a display heuristic only
+//   C12 Wave Registry stores spawn-phase and death-phase only
+//   C15 MCE implemented at 4 timeframe levels
+//   C16 rot_emergingWaveStrength deferred (not implemented in V1)
+// Every formula constant is exposed as a tunable input.
+// ═══════════════════════════════════════════════════════════════════════════════
+
+var string GRP_V72_DASH = "V72 — Decision Dashboard"
+var string GRP_V72_RIE  = "V72 — Rotation Intelligence (RIE)"
+var string GRP_V72_MCE  = "V72 — Multi-TF Consensus (MCE)"
+var string GRP_V72_TQE  = "V72 — Trade Qualification (TQE)"
+var string GRP_V72_TE   = "V72 — Target / Invalidation"
+var string GRP_V72_DOE  = "V72 — Decision Output (DOE)"
+
+bool dashAdvancedMode = input.bool(false, "Advanced Mode (Diagnostic Depth)", group=GRP_V72_DASH)
+bool showV72Command   = input.bool(true,  "Show V72 COMMAND Panel",           group=GRP_V72_DASH)
+
+// ───────────────────────────────────────────────────────────────────────────────
+// V72.1 — FRZ BEST-ZONE INDEX RESOLUTION (C1)
+// The V71 FRZ summary loop captures frz_bestScore but not the array index, top,
+// bottom or direction of the best zone. We re-scan the live zones to resolve the
+// highest-score zone's geometry. frz_bestTop/frz_bestBot/frz_bestDir do NOT exist
+// in V71 — they are derived here from frz_topArr / frz_botArr / frz_dirArr.
+// ───────────────────────────────────────────────────────────────────────────────
+int   v72_frzBestIdx = -1
+int   v72_frzBestSc  = -1
+int   _v72_frzN = array.size(frz_scoreArr)
+if _v72_frzN > 0
+    for _i = 0 to _v72_frzN - 1
+        if _i < array.size(frz_statusArr) and _i < array.size(frz_scoreArr)
+            string _stt = array.get(frz_statusArr, _i)
+            if _stt == "Open" or _stt == "Partial"
+                int _sc = array.get(frz_scoreArr, _i)
+                if _sc > v72_frzBestSc
+                    v72_frzBestSc  := _sc
+                    v72_frzBestIdx := _i
+
+float frz_bestZoneTop = v72_frzBestIdx >= 0 and v72_frzBestIdx < array.size(frz_topArr) ? array.get(frz_topArr, v72_frzBestIdx) : na
+float frz_bestZoneBot = v72_frzBestIdx >= 0 and v72_frzBestIdx < array.size(frz_botArr) ? array.get(frz_botArr, v72_frzBestIdx) : na
+int   frz_bestZoneDir = v72_frzBestIdx >= 0 and v72_frzBestIdx < array.size(frz_dirArr) ? array.get(frz_dirArr, v72_frzBestIdx) : 0
+string frz_bestZoneTier = v72_frzBestIdx >= 0 and v72_frzBestIdx < array.size(frz_tierArr) ? array.get(frz_tierArr, v72_frzBestIdx) : "–"
+float frz_bestZoneMid = (not na(frz_bestZoneTop) and not na(frz_bestZoneBot)) ? (frz_bestZoneTop + frz_bestZoneBot) / 2.0 : na
+
+// Distance from price to the best zone, in ATR units (resolves Audit 10 partial-display violation)
+float frz_distanceToZone = (frz_activeCount > 0 and not na(frz_bestZoneMid)) ? math.abs(close - frz_bestZoneMid) / math.max(atr, 1e-10) : na
+
+// FRZ proximity input (Part 8.1) — tunable per Readiness §1.3
+float frzProximityATR = input.float(2.0, "FRZ: Proximity Threshold (ATR)", group=GRP_V72_TQE, minval=0.1, step=0.1)
+bool  frz_inProximity = frz_activeCount > 0 and not na(frz_distanceToZone) and frz_distanceToZone < frzProximityATR
+
+// ── FRZ Confidence (Part 8.6) — distinct from frz_score ──────────────────────
+float frz_confidence = frz_activeCount > 0 ? math.min(
+     frz_bestScore * 0.40 +
+     (frz_bestStatus == "Open" ? 30.0 : frz_bestStatus == "Partial" ? 15.0 : 0.0) +
+     (frz_bestZoneTier == "T1" ? 30.0 : frz_bestZoneTier == "T2" ? 20.0 : 10.0),
+     100.0) : 0.0
+
+// ── FRZ <-> ERF UNIFICATION (Part 9) ─────────────────────────────────────────
+// frz_resolutionScore: how much of the zone's embedded energy is resolved.
+float frz_resolutionScore =
+     re_resolutionState == "RESOLVED"           ? 90.0 :
+     re_resolutionState == "PARTIALLY RESOLVED" ? 50.0 + re_recursiveCompletionScore * 0.40 :
+                                                   20.0 + ede_dissipationProgress * 0.30
+float frz_residualEnergy   = math.max(0.0, 100.0 - frz_resolutionScore)
+float frz_attractorWeight  = frz_activeCount > 0 ? math.min(
+     frz_residualEnergy * 0.50 +
+     frz_bestScore * 0.30 +
+     (frz_bestStatus == "Open" ? 20.0 : frz_bestStatus == "Partial" ? 10.0 : 0.0),
+     100.0) : 0.0
+
+// Convergence (Part 9.4) — DISPLAY FLAG ONLY in Phase 1/2 (C7, C14). No auto grade
+// promotion until validated.
+float frzConvergenceATR = input.float(0.5, "FRZ: Attractor Convergence (ATR)", group=GRP_V72_TQE, minval=0.1, step=0.1)
+bool  frz_attractorConvergence = frz_activeCount > 0 and not na(eae_primaryAttractorPrice) and not na(frz_bestZoneMid) and
+     math.abs(eae_primaryAttractorPrice - frz_bestZoneMid) / math.max(atr, 1e-10) < frzConvergenceATR
+
+
+// ───────────────────────────────────────────────────────────────────────────────
+// V72.2 — ROTATION INTELLIGENCE ENGINE (RIE / Engine 2)   [Spec Part 3]
+// Authority: control-transfer PRESSURE only. RIE never assigns a lifecycle phase
+// and never decides Retracement vs Expansion — that is IE1A's domain. All inputs
+// are existing read-only physics/energy sensors. Weights are tunable (C-readiness).
+// rot_emergingWaveStrength is DEFERRED to RIE v2 (C16).
+// liveDirective is NOT rebranded here (C8).
+// ───────────────────────────────────────────────────────────────────────────────
+float rieW_decay  = input.float(0.35, "RIE: Decay Weight",      group=GRP_V72_RIE, minval=0.0, maxval=1.0, step=0.05)
+float rieW_absorb = input.float(0.30, "RIE: Absorption Weight",  group=GRP_V72_RIE, minval=0.0, maxval=1.0, step=0.05)
+float rieW_convex = input.float(0.20, "RIE: Convexity Weight",   group=GRP_V72_RIE, minval=0.0, maxval=1.0, step=0.05)
+float rieW_stabExp= input.float(0.40, "RIE: Stability Expansion Weight", group=GRP_V72_RIE, minval=0.0, maxval=1.0, step=0.05)
+float rieW_press  = input.float(0.50, "RIE: Transfer Pressure Weight",   group=GRP_V72_RIE, minval=0.0, maxval=1.0, step=0.05)
+float rieW_stabInv= input.float(0.30, "RIE: Transfer Instability Weight",group=GRP_V72_RIE, minval=0.0, maxval=1.0, step=0.05)
+
+float rot_pressure = math.min(
+     obs_DecayScore      * rieW_decay +
+     obs_AbsorptionScore * rieW_absorb +
+     (convexityScore > 40 ? convexityScore * rieW_convex : 0.0) +
+     (obs_LiquidityScore > 50 ? 15.0 : 0.0),
+     100.0)
+
+float rot_controlStability = math.min(
+     obs_ExpansionScore * rieW_stabExp +
+     (efficiency > effThresh ? 30.0 : efficiency > effThresh * 0.7 ? 15.0 : 0.0) +
+     (ede_state <= 2 ? 30.0 : ede_state <= 3 ? 15.0 : 0.0),
+     100.0)
+
+float rot_transferProbability = math.min(
+     rot_pressure * rieW_press +
+     (100.0 - rot_controlStability) * rieW_stabInv +
+     (re_resolutionState == "UNRESOLVED" ? 20.0 : re_resolutionState == "PARTIALLY RESOLVED" ? 10.0 : 0.0),
+     100.0)
+
+string rot_state =
+     rot_transferProbability >= 75 ? "TRANSFER_IMMINENT" :
+     rot_transferProbability >= 50 ? "CONTESTED" :
+     rot_transferProbability >= 25 ? "SOFTENING" : "STABLE"
+
+
+// ───────────────────────────────────────────────────────────────────────────────
+// V72.3 — MULTI-TIMEFRAME CONSENSUS ENGINE (MCE)   [Spec Part 4, C15 = 4 levels]
+// Extends the existing tf1/tf2 belief mechanism to a configurable 4-TF stack by
+// reusing f_htfBeliefs (defined earlier) via request.security. MCE READS layer
+// directions; it never assigns lifecycle phases (authority preserved).
+// Lifecycle-progress score is a DISPLAY HEURISTIC only (C11) — never fed into a
+// physics/decision calculation. Equal-weight voting is the default (C15).
+// ───────────────────────────────────────────────────────────────────────────────
+string mce_tf3 = input.timeframe("240", "MCE: Timeframe 3 (HTF)", group=GRP_V72_MCE)
+string mce_tf4 = input.timeframe("D",   "MCE: Timeframe 4 (HTF)", group=GRP_V72_MCE)
+
+[raw_dir_tf3, raw_structB_tf3, raw_disp_tf3, raw_expScr_tf3, raw_decScr_tf3, raw_curvScr_tf3, raw_abScr_tf3, raw_liqScr_tf3] = request.security(syminfo.tickerid, mce_tf3,
+     f_htfBeliefs(open, high, low, close, effThresh, dispThresh, acceptBars, convMult, obLookback),
+     lookahead=barmerge.lookahead_off)
+
+[raw_dir_tf4, raw_structB_tf4, raw_disp_tf4, raw_expScr_tf4, raw_decScr_tf4, raw_curvScr_tf4, raw_abScr_tf4, raw_liqScr_tf4] = request.security(syminfo.tickerid, mce_tf4,
+     f_htfBeliefs(open, high, low, close, effThresh, dispThresh, acceptBars, convMult, obLookback),
+     lookahead=barmerge.lookahead_off)
+
+int   mce_tf1_direction = nz(dir_tf1)
+int   mce_tf2_direction = nz(dir_tf2)
+int   mce_tf3_direction = nz(raw_dir_tf3)
+int   mce_tf4_direction = nz(raw_dir_tf4)
+float mce_tf3_expScore  = nz(raw_expScr_tf3)
+float mce_tf4_expScore  = nz(raw_expScr_tf4)
+
+// Equal-weight agreement counts vs L0 structural direction
+int _mce_agreeAll  = (mce_tf1_direction == direction and direction != 0 ? 1 : 0) +
+                     (mce_tf2_direction == direction and direction != 0 ? 1 : 0) +
+                     (mce_tf3_direction == direction and direction != 0 ? 1 : 0) +
+                     (mce_tf4_direction == direction and direction != 0 ? 1 : 0)
+int _mce_agreeHtf  = (mce_tf3_direction == direction and direction != 0 ? 1 : 0) +
+                     (mce_tf4_direction == direction and direction != 0 ? 1 : 0)
+int _mce_agreeMtf  = (mce_tf2_direction == direction and direction != 0 ? 1 : 0) +
+                     (mce_tf3_direction == direction and direction != 0 ? 1 : 0)
+int _mce_agreeExec = (mce_tf1_direction == direction and direction != 0 ? 1 : 0) +
+                     (mce_tf2_direction == direction and direction != 0 ? 1 : 0)
+
+float mce_alignmentScore    = direction == 0 ? 0.0 : _mce_agreeAll  / 4.0 * 100.0
+float mce_htfAlignmentScore = direction == 0 ? 0.0 : _mce_agreeHtf  / 2.0 * 100.0
+float mce_mtfAlignmentScore = direction == 0 ? 0.0 : _mce_agreeMtf  / 2.0 * 100.0
+float mce_execAlignmentScore= direction == 0 ? 0.0 : _mce_agreeExec / 2.0 * 100.0
+
+// Lifecycle-progress heuristic (C11 — DISPLAY ONLY, never a physics input)
+int mce_lifecycleProgress =
+     ie1a_currentPhase == "Point 4 Origin"          ? 5  :
+     ie1a_currentPhase == "Expansion"               ? 20 :
+     ie1a_currentPhase == "Expansion Pre-Convexity" ? 35 :
+     ie1a_currentPhase == "Expansion Induction"     ? 50 :
+     ie1a_currentPhase == "Expansion Liquidity"     ? 65 :
+     ie1a_currentPhase == "New High"                ? 80 :
+     ie1a_currentPhase == "New Low"                 ? 80 :
+     ie1a_currentPhase == "Absorption"              ? 70 :
+     ie1a_currentPhase == "Retracement"             ? 55 :
+     ie1a_currentPhase == "Retracement Pre-Convexity"? 40 :
+     ie1a_currentPhase == "Retracement Induction"   ? 25 :
+     ie1a_currentPhase == "Retracement Liquidity"   ? 15 :
+     ie1a_currentPhase == "Demand Return"           ? 90 :
+     ie1a_currentPhase == "Supply Return"           ? 90 : 0
+
+// Alignment summaries (renamed from "narratives" per readiness — these are NOT
+// the Narrative Engine output; that single dominant story is ne_dominantNarrative)
+string mce_htfAlignmentSummary =
+     mce_htfAlignmentScore >= 80 and direction == 1  ? "HTF Bullish Continuation" :
+     mce_htfAlignmentScore >= 80 and direction == -1 ? "HTF Bearish Continuation" :
+     mce_htfAlignmentScore >= 60 and rot_transferProbability < 40 ? "HTF Trend Intact" :
+     mce_htfAlignmentScore >= 50 and rot_transferProbability >= 60 ? "HTF Rotation Developing" :
+     mce_htfAlignmentScore < 40 ? "HTF Contested — No Clear Bias" : "HTF Developing"
+
+string mce_execAlignmentSummary =
+     ie1a_currentPhase == "Demand Return" and mce_execAlignmentScore >= 60 ? "Execution Aligned — Long Window" :
+     ie1a_currentPhase == "Supply Return" and mce_execAlignmentScore >= 60 ? "Execution Aligned — Short Window" :
+     mce_execAlignmentScore < 40 ? "Execution Conflict — Wait" : "Execution Developing"
+
+
+// ───────────────────────────────────────────────────────────────────────────────
+// V72.4 — NARRATIVE ENGINE (NE)   [Spec Part 5]
+// Produces exactly ONE dominant market story from MCE consensus + IE1A lifecycle.
+// Never assigns lifecycle, never produces a trade recommendation. C3 applied:
+// Demand Return / Supply Return are PULLBACKS, not continuations. Graceful
+// degradation: if MCE direction is flat, htfAlign (V71) seeds the bias.
+// ───────────────────────────────────────────────────────────────────────────────
+bool _ne_phaseExpBull = ie1a_currentPhase == "Expansion" or ie1a_currentPhase == "New High"
+bool _ne_phaseExpBear = ie1a_currentPhase == "Expansion" or ie1a_currentPhase == "New Low"
+bool _ne_phasePullback = ie1a_currentPhase == "Retracement" or
+     ie1a_currentPhase == "Retracement Pre-Convexity" or
+     ie1a_currentPhase == "Retracement Induction" or
+     ie1a_currentPhase == "Retracement Liquidity"
+bool _ne_phaseDemandReturn = ie1a_currentPhase == "Demand Return"
+bool _ne_phaseSupplyReturn = ie1a_currentPhase == "Supply Return"
+
+// Degradation: when MCE has no directional read, fall back to V71 htfAlign
+float _ne_htfScore = mce_htfAlignmentScore > 0 ? mce_htfAlignmentScore :
+     (htfAlign == direction and direction != 0 ? 70.0 : 0.0)
+
+string ne_dominantNarrative =
+     direction == 1  and _ne_htfScore >= 70 and _ne_phaseExpBull and rot_transferProbability < 40 ? "Bullish Continuation" :
+     direction == -1 and _ne_htfScore >= 70 and _ne_phaseExpBear and rot_transferProbability < 40 ? "Bearish Continuation" :
+     direction == 1  and (_ne_phasePullback or _ne_phaseDemandReturn) and _ne_htfScore >= 55 ? "Bullish Pullback" :
+     direction == -1 and (_ne_phasePullback or _ne_phaseSupplyReturn) and _ne_htfScore >= 55 ? "Bearish Pullback" :
+     rot_transferProbability >= 65 and direction == -1 and _ne_htfScore >= 50 ? "Bullish Rotation" :
+     rot_transferProbability >= 65 and direction == 1  and _ne_htfScore >= 50 ? "Bearish Rotation" :
+     rot_state == "CONTESTED" and math.abs(mce_alignmentScore - 50) < 15 and re_resolutionState == "UNRESOLVED" ? "Range Development" :
+     "No Clear Narrative"
+
+float ne_narrativeStrength = math.min(
+     mce_alignmentScore * 0.40 +
+     rot_controlStability * 0.30 +
+     (re_resolutionState == "RESOLVED" ? 30.0 : re_resolutionState == "PARTIALLY RESOLVED" ? 15.0 : 0.0),
+     100.0)
+
+bool ne_narrativeConflict = rot_state == "CONTESTED" and math.abs(mce_alignmentScore - 50) < 15
+
+// Narrative age: bars since the dominant narrative last changed (anti-flapping)
+var int    ne_narrativeAge = 0
+var string _ne_prevNarrative = "No Clear Narrative"
+ne_narrativeAge := ne_dominantNarrative == _ne_prevNarrative ? ne_narrativeAge + 1 : 0
+_ne_prevNarrative := ne_dominantNarrative
+
+
+// ───────────────────────────────────────────────────────────────────────────────
+// V72.5 — INVALIDATION ENGINE (IE2)   [Spec Part 11, C9 applied]
+// Pre-computes the price level at which each thesis fails. IE2 does NOT assign
+// lifecycle and does NOT create its own invalidation trigger — it reads the V71
+// origins/flip zones and the existing bullInvalid/bearInvalid booleans, and adds
+// explicit price levels. Demand/Supply fail prices use flipBot/flipTop (C9), not
+// a geometric approximation. Buffers are tunable.
+// ───────────────────────────────────────────────────────────────────────────────
+float invOriginBuffer = input.float(0.25, "IE2: Origin Stop Buffer (ATR)", group=GRP_V72_TE, minval=0.0, step=0.05)
+float invZoneBuffer   = input.float(0.10, "IE2: Zone Stop Buffer (ATR)",   group=GRP_V72_TE, minval=0.0, step=0.05)
+
+float inv_bullOriginPrice = not na(point4OriginLow)  ? point4OriginLow  - atr * invOriginBuffer : na
+float inv_bearOriginPrice = not na(point4OriginHigh) ? point4OriginHigh + atr * invOriginBuffer : na
+float inv_demandFailPrice = direction == 1  and not na(flipBot) ? flipBot - atr * invZoneBuffer : na
+float inv_supplyFailPrice = direction == -1 and not na(flipTop) ? flipTop + atr * invZoneBuffer : na
+
+float inv_activeStop =
+     direction == 1  ? nz(inv_demandFailPrice, inv_bullOriginPrice) :
+     direction == -1 ? nz(inv_supplyFailPrice, inv_bearOriginPrice) : na
+
+bool inv_invalidated = not na(inv_activeStop) and
+     (direction == 1 ? close < inv_activeStop : direction == -1 ? close > inv_activeStop : false)
+
+float inv_riskInPts = not na(inv_activeStop) ? math.abs(close - inv_activeStop) : na
+float inv_riskInATR = not na(inv_riskInPts) ? inv_riskInPts / math.max(atr, 1e-10) : na
+
+// ───────────────────────────────────────────────────────────────────────────────
+// V72.6 — TARGET ENGINE (TE)   [Spec Part 10, C2 directional validation]
+// TP1 (Phase 1): highest-score FRZ in the trade direction beyond price (safest).
+// TP2 (Phase 2): primary attractor — only if directionally valid (C2).
+// TP3 (Phase 3): tertiary attractor extension — directionally validated, gated.
+// TE consumes EAE attractors and FRZ zones; it never creates attractors.
+// te_expectedPath is DISPLAY-ONLY (not a decision gate).
+// ───────────────────────────────────────────────────────────────────────────────
+float teTertiaryATR  = input.float(2.0, "TE: Tertiary Extension (ATR)", group=GRP_V72_TE, minval=0.1, step=0.1)
+float rrMinimum      = input.float(1.5, "TE: Minimum R:R for TP1 Gate",  group=GRP_V72_TE, minval=0.5, step=0.1)
+bool  teTertiaryOn   = input.bool(false, "TE: Enable Tertiary TP3 (research)", group=GRP_V72_TE)
+
+// Tertiary attractor (Spec 10.6) — pure price-level calculation, no lifecycle touch
+float eae_tertiaryAttractorPrice =
+     direction == 1  ? math.max(nz(eae_primaryAttractorPrice, close), nz(eae_secondaryAttractorPrice, close)) + atr * teTertiaryATR :
+     direction == -1 ? math.min(nz(eae_primaryAttractorPrice, close), nz(eae_secondaryAttractorPrice, close)) - atr * teTertiaryATR : na
+float eae_tertiaryAttractorScore =
+     re_residualEnergyScore * 0.30 +
+     (mce_htfAlignmentScore >= 75 ? 40.0 : mce_htfAlignmentScore * 0.30) +
+     (re_resolutionState == "RESOLVED" ? 30.0 : 10.0)
+
+// TP1 — FRZ-based, directionally filtered (C2-safe Phase 1 source)
+float te_tp1 = na
+int   _te_bestSc = -1
+int   _te_n = array.size(frz_scoreArr)
+if _te_n > 0 and direction != 0
+    for _j = 0 to _te_n - 1
+        if _j < array.size(frz_statusArr) and _j < array.size(frz_dirArr) and _j < array.size(frz_topArr) and _j < array.size(frz_botArr)
+            string _st2 = array.get(frz_statusArr, _j)
+            int    _fd3 = array.get(frz_dirArr,    _j)
+            if (_st2 == "Open" or _st2 == "Partial") and _fd3 == direction
+                float _top2 = array.get(frz_topArr, _j)
+                float _bot2 = array.get(frz_botArr, _j)
+                float _mid2 = (_top2 + _bot2) / 2.0
+                bool  _beyond = direction == 1 ? _mid2 > close : _mid2 < close
+                int   _sc2 = array.get(frz_scoreArr, _j)
+                if _beyond and _sc2 > _te_bestSc
+                    _te_bestSc := _sc2
+                    te_tp1 := _mid2
+
+// TP2 — primary attractor, directionally validated (C2)
+bool  te_tp2_valid = not na(eae_primaryAttractorPrice) and
+     (direction == 1 ? eae_primaryAttractorPrice > close : direction == -1 ? eae_primaryAttractorPrice < close : false)
+float te_tp2 = te_tp2_valid ? eae_primaryAttractorPrice : na
+
+// TP3 — tertiary, directionally validated, gated behind research toggle
+bool  te_tp3_valid = teTertiaryOn and not na(eae_tertiaryAttractorPrice) and
+     (direction == 1 ? eae_tertiaryAttractorPrice > close : direction == -1 ? eae_tertiaryAttractorPrice < close : false)
+float te_tp3 = te_tp3_valid ? eae_tertiaryAttractorPrice : na
+
+float te_tp1_quality = math.min(
+     eae_secondaryAttractorScore * 0.40 +
+     (frz_attractorConvergence ? 40.0 : frz_bestScore * 0.25) +
+     re_recursiveCompletionScore * 0.15 +
+     mce_execAlignmentScore * 0.20, 100.0)
+float te_tp2_quality = math.min(
+     eae_primaryAttractorScore * 0.50 +
+     re_residualEnergyScore * 0.30 +
+     mce_htfAlignmentScore * 0.20, 100.0)
+float te_tp3_quality = math.min(
+     (eae_tertiaryAttractorScore > 0 ? eae_tertiaryAttractorScore * 0.60 : 20.0) +
+     (mce_htfAlignmentScore >= 80 ? 40.0 : mce_htfAlignmentScore * 0.30), 100.0)
+
+float te_rr_tp1 = (not na(te_tp1) and not na(inv_riskInPts) and inv_riskInPts > 0) ? math.abs(te_tp1 - close) / inv_riskInPts : na
+float te_rr_tp2 = (not na(te_tp2) and not na(inv_riskInPts) and inv_riskInPts > 0) ? math.abs(te_tp2 - close) / inv_riskInPts : na
+float te_rr_tp3 = (not na(te_tp3) and not na(inv_riskInPts) and inv_riskInPts > 0) ? math.abs(te_tp3 - close) / inv_riskInPts : na
+bool  te_rrGate = not na(te_rr_tp1) and te_rr_tp1 >= rrMinimum
+
+string te_expectedPath =
+     re_resolutionState == "RESOLVED" and mce_execAlignmentScore >= 70 ? "Direct" :
+     (ie1a_currentPhase == "Demand Return" or ie1a_currentPhase == "Supply Return") ? "Direct" :
+     rot_transferProbability > 50 ? "Retracement First" :
+     re_resolutionState == "UNRESOLVED" ? "Range Then Breakout" : "Direct"
+
+
+// ───────────────────────────────────────────────────────────────────────────────
+// V72.7 — TRADE QUALIFICATION ENGINE (TQE)   [Spec Part 6]
+// Gate + scoring layer between intelligence and decision. C4 applied: the ERF
+// slot uses erf_pureConfidence (IE1A component removed) to avoid double-counting
+// ie1a_phaseConfidence. C6 applied: tqe_grade is a DISPLAY LABEL ONLY and does
+// NOT gate doe_action. All weights and grade thresholds are tunable inputs.
+// ───────────────────────────────────────────────────────────────────────────────
+float tqeW_ie1a = input.float(0.25, "TQE: IE1A Confidence Weight",   group=GRP_V72_TQE, minval=0.0, maxval=1.0, step=0.01)
+float tqeW_erf  = input.float(0.15, "TQE: ERF (pure) Weight",        group=GRP_V72_TQE, minval=0.0, maxval=1.0, step=0.01)
+float tqeW_frz  = input.float(0.15, "TQE: FRZ Quality Weight",       group=GRP_V72_TQE, minval=0.0, maxval=1.0, step=0.01)
+float tqeW_mce  = input.float(0.20, "TQE: MCE HTF Alignment Weight", group=GRP_V72_TQE, minval=0.0, maxval=1.0, step=0.01)
+float tqeW_re   = input.float(0.10, "TQE: RE Completion Weight",     group=GRP_V72_TQE, minval=0.0, maxval=1.0, step=0.01)
+float tqeW_liq  = input.float(0.15, "TQE: Liquidity Quality Weight", group=GRP_V72_TQE, minval=0.0, maxval=1.0, step=0.01)
+float tqeGradeA1= input.float(85.0, "TQE: A+ Threshold", group=GRP_V72_TQE, minval=0.0, maxval=100.0, step=1.0)
+float tqeGradeA = input.float(72.0, "TQE: A Threshold",  group=GRP_V72_TQE, minval=0.0, maxval=100.0, step=1.0)
+float tqeGradeB = input.float(58.0, "TQE: B Threshold",  group=GRP_V72_TQE, minval=0.0, maxval=100.0, step=1.0)
+float tqeGradeC = input.float(42.0, "TQE: C Threshold",  group=GRP_V72_TQE, minval=0.0, maxval=100.0, step=1.0)
+
+// erf_pureConfidence (C4): erf_confidence rebuilt WITHOUT the ie1a_phaseConfidence term
+float erf_pureConfidence = math.min(
+     20.0 +
+     (re_resolutionState == "RESOLVED" ? 30.0 : re_resolutionState == "PARTIALLY RESOLVED" ? 20.0 : 10.0) +
+     eae_primaryAttractorScore * 0.30, 100.0)
+
+float frz_entryBonus = (frz_inProximity and frz_bestZoneDir == direction) ? 15.0 : 0.0
+
+float tqe_frzQuality = frz_activeCount > 0 ? math.min(
+     frz_bestScore * 0.50 +
+     (frz_bestZoneTier == "T1" ? 40.0 : frz_bestZoneTier == "T2" ? 25.0 : frz_bestZoneTier == "T3" ? 10.0 : 0.0) +
+     (frz_bestStatus == "Open" ? 10.0 : frz_bestStatus == "Partial" ? 5.0 : 0.0) +
+     frz_entryBonus, 100.0) : 0.0
+
+float tqe_liqQuality = math.min(
+     obs_LiquidityScore * 0.50 +
+     ((liqSweepBull or liqSweepBear) ? 30.0 : 0.0) +
+     (liqVacuum ? 20.0 : 0.0), 100.0)
+
+float tqe_rawScore =
+     ie1a_phaseConfidence        * tqeW_ie1a +
+     erf_pureConfidence          * tqeW_erf  +
+     tqe_frzQuality              * tqeW_frz  +
+     mce_htfAlignmentScore       * tqeW_mce  +
+     re_recursiveCompletionScore * tqeW_re   +
+     tqe_liqQuality              * tqeW_liq
+
+string tqe_grade =
+     tqe_rawScore >= tqeGradeA1 ? "A+" :
+     tqe_rawScore >= tqeGradeA  ? "A"  :
+     tqe_rawScore >= tqeGradeB  ? "B"  :
+     tqe_rawScore >= tqeGradeC  ? "C"  : "D"
+
+bool tqe_readiness =
+     ie1a_phaseConfidence  >= 50 and
+     erf_confidence        >= 40 and
+     mce_htfAlignmentScore >= 50 and
+     tqe_grade != "D"
+
+string tqe_riskLevel =
+     (rot_transferProbability > 65 or re_resolutionState == "UNRESOLVED") ? "HIGH" :
+     (rot_transferProbability > 35 or tqe_rawScore < 60)                  ? "MEDIUM" : "LOW"
+
+// ───────────────────────────────────────────────────────────────────────────────
+// V72.8 — DECISION OUTPUT ENGINE (DOE)   [Spec Part 12]
+// The single actionable recommendation. Consumes upstream outputs only; computes
+// no raw signals. Resolves the three-directive conflict: doe_action is the one
+// action string. C6: action uses STRUCTURAL gates only (not TQE grade). C1: entry
+// zone derived from FRZ best-zone via array index (frz_bestTop/Bot do not exist).
+// Confidence is modelConfidence-based per Readiness (not the uncalibrated formula).
+// ───────────────────────────────────────────────────────────────────────────────
+int doeCapBase = input.int(88, "DOE: Confidence Cap (base)",        group=GRP_V72_DOE, minval=50, maxval=100)
+int doeCapConv = input.int(95, "DOE: Confidence Cap (convergence)", group=GRP_V72_DOE, minval=50, maxval=100)
+
+string doe_bias =
+     direction == 1  and mce_htfAlignmentScore >= 75 and rot_controlStability >= 65 ? "Strong Bullish" :
+     direction == 1  and mce_htfAlignmentScore >= 50 ? "Bullish" :
+     direction == -1 and mce_htfAlignmentScore >= 75 and rot_controlStability >= 65 ? "Strong Bearish" :
+     direction == -1 and mce_htfAlignmentScore >= 50 ? "Bearish" : "Neutral"
+
+string doe_action =
+     inv_invalidated ? "No Trade" :
+     not erf_entryGate ? "Wait" :
+     not te_rrGate ? "Wait" :
+     (ie1a_currentPhase == "Demand Return" and direction == 1)  ? "Long"  :
+     (ie1a_currentPhase == "Supply Return" and direction == -1) ? "Short" :
+     "Wait"
+
+float doe_confidence = math.min(
+     modelConfidence      * 0.50 +
+     mce_alignmentScore   * 0.25 +
+     ie1a_phaseConfidence * 0.25,
+     frz_attractorConvergence ? doeCapConv : doeCapBase)
+
+string doe_tradeType =
+     (ne_dominantNarrative == "Bullish Continuation" or ne_dominantNarrative == "Bearish Continuation") ? "Continuation" :
+     (ne_dominantNarrative == "Bullish Pullback"     or ne_dominantNarrative == "Bearish Pullback")     ? "Pullback" :
+     (ne_dominantNarrative == "Bullish Rotation"     or ne_dominantNarrative == "Bearish Rotation")     ? "Rotation" :
+     ne_dominantNarrative == "Range Development" ? "Range" :
+     (ie1a_currentPhase == "New High" or ie1a_currentPhase == "New Low") ? "Breakout" : "Wait"
+
+float doe_entryMid =
+     (frz_inProximity and frz_bestZoneDir == direction and not na(frz_bestZoneMid)) ? frz_bestZoneMid :
+     (ie1a_currentPhase == "Demand Return" and not na(point4OriginHigh) and not na(point4OriginLow)) ? (point4OriginHigh + point4OriginLow) / 2.0 :
+     (ie1a_currentPhase == "Supply Return" and not na(ie1a_inductionExtreme) and not na(ie1a_inductionOrigin)) ? (ie1a_inductionExtreme + ie1a_inductionOrigin) / 2.0 :
+     close
+
+float doe_entryHigh = not na(doe_entryMid) ? doe_entryMid + atr * 0.30 : na
+float doe_entryLow  = not na(doe_entryMid) ? doe_entryMid - atr * 0.30 : na
+
+string doe_entryTrigger =
+     frz_inProximity ? "Limit" :
+     (ie1a_currentPhase == "Demand Return" or ie1a_currentPhase == "Supply Return") ? "LimitOnRetest" : "Market"
+
+string doe_entryQuality = tqe_grade   // mirrors TQE grade (display label, C6)
+
+
+// ───────────────────────────────────────────────────────────────────────────────
+// V72.9 — WAVE REGISTRY (WR)   [Spec Part 13]
+// Sequential wave identity via parallel arrays (PineScript has no structs). WR
+// stores and retrieves identity — it never computes lifecycle state. Spawn/death
+// are detected by edge transitions on the existing `direction` / `entryCycle`
+// state so no edits to the delicate V71 reset logic are required. C5: the death
+// hook is evaluated BEFORE any respawn this bar. C12: only spawn-phase and
+// death-phase are stored (no per-bar history). Arrays are bounded (rolling).
+// ───────────────────────────────────────────────────────────────────────────────
+var array<int>    wr_waveId          = array.new_int()
+var array<int>    wr_parentWaveId    = array.new_int()
+var array<int>    wr_rootWaveId      = array.new_int()
+var array<int>    wr_birthBar        = array.new_int()
+var array<int>    wr_deathBar        = array.new_int()
+var array<string> wr_spawnPhase      = array.new_string()
+var array<string> wr_deathPhase      = array.new_string()
+var array<float>  wr_peakEnergy      = array.new_float()
+var array<float>  wr_resolutionScore = array.new_float()
+var array<int>    wr_waveDepth       = array.new_int()
+
+var int wr_nextId         = 1
+var int wr_activeWaveId   = 0
+var int wr_activeParentId = 0
+var int wr_activeRootId   = 0
+int     wr_maxEntries     = 50
+
+int  _wr_prevDir   = nz(direction[1])
+int  _wr_prevCycle = nz(entryCycle[1])
+bool _wr_died     = direction == 0 and _wr_prevDir != 0
+bool _wr_newRoot  = (direction != 0 and _wr_prevDir == 0) or (direction != 0 and _wr_prevDir != 0 and direction != _wr_prevDir)
+bool _wr_newChild = direction != 0 and entryCycle > _wr_prevCycle and not _wr_newRoot
+
+// Death hook FIRST (C5)
+if _wr_died and wr_activeWaveId > 0
+    int _di = array.indexof(wr_waveId, wr_activeWaveId)
+    if _di >= 0
+        array.set(wr_deathBar,        _di, bar_index)
+        array.set(wr_deathPhase,      _di, ie1a_currentPhase)
+        array.set(wr_resolutionScore, _di, re_recursiveCompletionScore)
+    wr_activeWaveId   := 0
+    wr_activeParentId := 0
+    wr_activeRootId   := 0
+
+// Spawn hook
+if _wr_newRoot or _wr_newChild
+    int _newId  = wr_nextId
+    wr_nextId  := wr_nextId + 1
+    int _parent = _wr_newChild ? wr_activeWaveId : 0
+    int _root   = _wr_newChild and wr_activeRootId > 0 ? wr_activeRootId : _newId
+    int _depth  = _wr_newChild ? math.max(0, entryCycle) : 0
+    array.push(wr_waveId,          _newId)
+    array.push(wr_parentWaveId,    _parent)
+    array.push(wr_rootWaveId,      _root)
+    array.push(wr_birthBar,        bar_index)
+    array.push(wr_deathBar,        -1)
+    array.push(wr_spawnPhase,      ie1a_currentPhase)
+    array.push(wr_deathPhase,      "")
+    array.push(wr_peakEnergy,      ede_expansionEnergy)
+    array.push(wr_resolutionScore, 0.0)
+    array.push(wr_waveDepth,       _depth)
+    wr_activeWaveId   := _newId
+    wr_activeParentId := _parent
+    wr_activeRootId   := _root
+    if array.size(wr_waveId) > wr_maxEntries
+        array.shift(wr_waveId)
+        array.shift(wr_parentWaveId)
+        array.shift(wr_rootWaveId)
+        array.shift(wr_birthBar)
+        array.shift(wr_deathBar)
+        array.shift(wr_spawnPhase)
+        array.shift(wr_deathPhase)
+        array.shift(wr_peakEnergy)
+        array.shift(wr_resolutionScore)
+        array.shift(wr_waveDepth)
+
+// Track peak energy for the active wave
+if wr_activeWaveId > 0
+    int _ai = array.indexof(wr_waveId, wr_activeWaveId)
+    if _ai >= 0 and ede_expansionEnergy > array.get(wr_peakEnergy, _ai)
+        array.set(wr_peakEnergy, _ai, ede_expansionEnergy)
+
+// ───────────────────────────────────────────────────────────────────────────────
+// V72.10 — DELIVERY WAVE REGISTRY (DWR)   [Spec Part 14]
+// Tracks delivery-wave lineage. Spawns when EDE enters Liquidity (state 4) or the
+// liquidation leg becomes directional. DWR stores lineage; EDE owns energy.
+// (Readiness defers DWR's downstream decision consumption — here it is registry +
+// Advanced-dashboard traceability only, with zero impact on doe_action.)
+// ───────────────────────────────────────────────────────────────────────────────
+var array<int>    dwr_waveId          = array.new_int()
+var array<int>    dwr_rootWaveId      = array.new_int()
+var array<int>    dwr_startBar        = array.new_int()
+var array<int>    dwr_endBar          = array.new_int()
+var array<float>  dwr_energy          = array.new_float()
+var array<string> dwr_resolutionState = array.new_string()
+var array<int>    dwr_entryCycle      = array.new_int()
+
+var int dwr_nextId     = 1
+var int dwr_activeId   = 0
+int     dwr_maxEntries = 50
+
+var bool _dwr_prevLBD = false
+bool dwr_shouldSpawn =
+     (ede_state == 4 and nz(ede_state[1]) != 4) or
+     (ede_liquidationBecomingDirectional and not _dwr_prevLBD)
+_dwr_prevLBD := ede_liquidationBecomingDirectional
+
+if dwr_shouldSpawn
+    int _did   = dwr_nextId
+    dwr_nextId := dwr_nextId + 1
+    array.push(dwr_waveId,          _did)
+    array.push(dwr_rootWaveId,      wr_activeRootId)
+    array.push(dwr_startBar,        bar_index)
+    array.push(dwr_endBar,          -1)
+    array.push(dwr_energy,          ede_expansionEnergy)
+    array.push(dwr_resolutionState, re_resolutionState)
+    array.push(dwr_entryCycle,      entryCycle)
+    dwr_activeId := _did
+    if array.size(dwr_waveId) > dwr_maxEntries
+        array.shift(dwr_waveId)
+        array.shift(dwr_rootWaveId)
+        array.shift(dwr_startBar)
+        array.shift(dwr_endBar)
+        array.shift(dwr_energy)
+        array.shift(dwr_resolutionState)
+        array.shift(dwr_entryCycle)
+
+if dwr_activeId > 0
+    int _dwi = array.indexof(dwr_waveId, dwr_activeId)
+    if _dwi >= 0
+        array.set(dwr_resolutionState, _dwi, re_resolutionState)
+        if re_resolutionState == "RESOLVED" and array.get(dwr_endBar, _dwi) == -1
+            array.set(dwr_endBar, _dwi, bar_index)
+
+// ───────────────────────────────────────────────────────────────────────────────
+// V72.11 — TRACEABILITY STRINGS   [Spec Part 15] — formatted concatenation only
+// ───────────────────────────────────────────────────────────────────────────────
+string trc_decisionSource =
+     "IE1A:" + ie1a_currentPhase + " | TQE:" + tqe_grade + " | NE:" + ne_dominantNarrative
+string trc_confidenceBreakdown =
+     "IE1A:" + str.tostring(math.round(ie1a_phaseConfidence)) +
+     " ERF:" + str.tostring(math.round(erf_pureConfidence)) +
+     " FRZ:" + str.tostring(math.round(tqe_frzQuality)) +
+     " MCE:" + str.tostring(math.round(mce_htfAlignmentScore)) +
+     " RE:"  + str.tostring(math.round(re_recursiveCompletionScore)) +
+     " LIQ:" + str.tostring(math.round(tqe_liqQuality))
+string trc_waveChain =
+     "Wave#" + str.tostring(wr_activeWaveId) + " (parent #" + str.tostring(wr_activeParentId) +
+     ", root #" + str.tostring(wr_activeRootId) + ")"
+string trc_deliveryChain = "Delivery#" + str.tostring(dwr_activeId)
+
+
+// ───────────────────────────────────────────────────────────────────────────────
+// V72.12 — DASHBOARD (Spec Part 16)
+// Standard COMMAND panel: ~20 decision-grade fields, always visible (middle_right).
+// Advanced INTEL panel: diagnostic depth, gated behind dashAdvancedMode (middle_left).
+// Dashboard is DISPLAY ONLY — it performs no computation and assigns no engine vars.
+// ───────────────────────────────────────────────────────────────────────────────
+f_v72_px(float _v)  => na(_v) ? "–" : str.tostring(math.round_to_mintick(_v))
+f_v72_pct(float _v) => na(_v) ? "–" : str.tostring(math.round(_v)) + "%"
+f_v72_num(float _v, int _d) => na(_v) ? "–" : str.tostring(math.round(_v, _d))
+
+f_v72_actionCol(string _a) =>
+     _a == "Long" ? #00ff88 : _a == "Short" ? color.red : _a == "No Trade" ? color.maroon : color.gray
+f_v72_gradeCol(string _g) =>
+     _g == "A+" ? #00ffcc : _g == "A" ? color.lime : _g == "B" ? color.yellow : _g == "C" ? color.orange : color.red
+f_v72_riskCol(string _r) =>
+     _r == "LOW" ? color.lime : _r == "MEDIUM" ? color.yellow : color.red
+
+string _szCmd = dashTextSize == "tiny" ? size.tiny : dashTextSize == "normal" ? size.normal : size.small
+
+if barstate.islast and showTable and showV72Command
+    var table cmd = table.new(position.middle_right, 2, 22,
+         bgcolor      = color.new(#05050f, 0),
+         border_color = color.new(#00ffcc, 40),
+         border_width = 1,
+         frame_color  = color.new(#00ffcc, 10),
+         frame_width  = 1)
+
+    table.cell(cmd, 0, 0, "V72 COMMAND", text_color=color.white, bgcolor=color.new(#0a0a30, 0), text_size=_szCmd)
+    table.cell(cmd, 1, 0, doe_action, text_color=color.black, bgcolor=f_v72_actionCol(doe_action), text_size=_szCmd)
+
+    table.cell(cmd, 0, 1, "Bias", text_color=#00ffcc, text_size=_szCmd)
+    table.cell(cmd, 1, 1, doe_bias, text_color=color.white, text_size=_szCmd)
+
+    table.cell(cmd, 0, 2, "Narrative", text_color=#00ffcc, text_size=_szCmd)
+    table.cell(cmd, 1, 2, ne_dominantNarrative, text_color=color.white, text_size=_szCmd)
+
+    table.cell(cmd, 0, 3, "Narr Strength", text_color=#00ffcc, text_size=_szCmd)
+    table.cell(cmd, 1, 3, f_v72_pct(ne_narrativeStrength), text_color=color.silver, text_size=_szCmd)
+
+    table.cell(cmd, 0, 4, "Confidence", text_color=#00ffcc, text_size=_szCmd)
+    table.cell(cmd, 1, 4, f_v72_pct(doe_confidence), text_color=color.white, text_size=_szCmd)
+
+    table.cell(cmd, 0, 5, "Trade Type", text_color=#00ffcc, text_size=_szCmd)
+    table.cell(cmd, 1, 5, doe_tradeType, text_color=color.white, text_size=_szCmd)
+
+    table.cell(cmd, 0, 6, "Entry Zone", text_color=#00ffcc, text_size=_szCmd)
+    table.cell(cmd, 1, 6, f_v72_px(doe_entryLow) + " – " + f_v72_px(doe_entryHigh), text_color=color.white, text_size=_szCmd)
+
+    table.cell(cmd, 0, 7, "Entry Trigger", text_color=#00ffcc, text_size=_szCmd)
+    table.cell(cmd, 1, 7, doe_entryTrigger, text_color=color.silver, text_size=_szCmd)
+
+    table.cell(cmd, 0, 8, "Trade Quality", text_color=#00ffcc, text_size=_szCmd)
+    table.cell(cmd, 1, 8, tqe_grade + " (prov)", text_color=color.black, bgcolor=f_v72_gradeCol(tqe_grade), text_size=_szCmd)
+
+    table.cell(cmd, 0, 9, "Risk Level", text_color=#00ffcc, text_size=_szCmd)
+    table.cell(cmd, 1, 9, tqe_riskLevel, text_color=f_v72_riskCol(tqe_riskLevel), text_size=_szCmd)
+
+    table.cell(cmd, 0, 10, "TP1", text_color=#00ffcc, text_size=_szCmd)
+    table.cell(cmd, 1, 10, f_v72_px(te_tp1) + "  (" + f_v72_pct(te_tp1_quality) + ")", text_color=color.lime, text_size=_szCmd)
+
+    table.cell(cmd, 0, 11, "TP2", text_color=#00ffcc, text_size=_szCmd)
+    table.cell(cmd, 1, 11, f_v72_px(te_tp2) + "  (" + f_v72_pct(te_tp2_quality) + ")", text_color=color.lime, text_size=_szCmd)
+
+    table.cell(cmd, 0, 12, "TP3", text_color=#00ffcc, text_size=_szCmd)
+    table.cell(cmd, 1, 12, te_tp3_quality >= 40 ? f_v72_px(te_tp3) + "  (" + f_v72_pct(te_tp3_quality) + ")" : "–", text_color=color.lime, text_size=_szCmd)
+
+    table.cell(cmd, 0, 13, "Stop", text_color=#00ffcc, text_size=_szCmd)
+    table.cell(cmd, 1, 13, f_v72_px(inv_activeStop) + (inv_invalidated ? " ✗" : ""), text_color=color.red, text_size=_szCmd)
+
+    table.cell(cmd, 0, 14, "R:R TP1", text_color=#00ffcc, text_size=_szCmd)
+    table.cell(cmd, 1, 14, f_v72_num(te_rr_tp1, 2) + (te_rrGate ? " ✓" : " ✗"), text_color=te_rrGate ? color.lime : color.orange, text_size=_szCmd)
+
+    table.cell(cmd, 0, 15, "Wave Phase", text_color=#00ffcc, text_size=_szCmd)
+    table.cell(cmd, 1, 15, ie1a_currentPhase + " (" + f_v72_pct(ie1a_phaseConfidence) + ")", text_color=color.white, text_size=_szCmd)
+
+    table.cell(cmd, 0, 16, "ERF Readiness", text_color=#00ffcc, text_size=_szCmd)
+    table.cell(cmd, 1, 16, f_v72_pct(erf_tradeReadiness) + (erf_entryGate ? " ✓" : " ✗"), text_color=erf_entryGate ? color.lime : color.orange, text_size=_szCmd)
+
+    table.cell(cmd, 0, 17, "FRZ Distance", text_color=#00ffcc, text_size=_szCmd)
+    table.cell(cmd, 1, 17, na(frz_distanceToZone) ? "–" : f_v72_num(frz_distanceToZone, 2) + " ATR", text_color=color.silver, text_size=_szCmd)
+
+    table.cell(cmd, 0, 18, "Primary Attractor", text_color=#00ffcc, text_size=_szCmd)
+    table.cell(cmd, 1, 18, f_v72_px(eae_primaryAttractorPrice) + "  " + eae_primaryAttractorLabel, text_color=color.aqua, text_size=_szCmd)
+
+    table.cell(cmd, 0, 19, "Convergence", text_color=#00ffcc, text_size=_szCmd)
+    table.cell(cmd, 1, 19, frz_attractorConvergence ? "● ACTIVE" : "○ none", text_color=frz_attractorConvergence ? #00ffcc : color.gray, text_size=_szCmd)
+
+    table.cell(cmd, 0, 20, "HTF Read", text_color=#00ffcc, text_size=_szCmd)
+    table.cell(cmd, 1, 20, mce_htfAlignmentSummary, text_color=color.silver, text_size=_szCmd)
+
+    table.cell(cmd, 0, 21, "Exec Read", text_color=#00ffcc, text_size=_szCmd)
+    table.cell(cmd, 1, 21, mce_execAlignmentSummary, text_color=color.silver, text_size=_szCmd)
+
+// ── Advanced INTEL panel (gated) ─────────────────────────────────────────────
+if barstate.islast and showTable and dashAdvancedMode
+    var table adv = table.new(position.middle_left, 2, 18,
+         bgcolor      = color.new(#0f0505, 0),
+         border_color = color.new(#ff9900, 40),
+         border_width = 1,
+         frame_color  = color.new(#ff9900, 10),
+         frame_width  = 1)
+
+    table.cell(adv, 0, 0, "V72 INTEL (ADV)", text_color=color.white, bgcolor=color.new(#301a0a, 0), text_size=_szCmd)
+    table.cell(adv, 1, 0, rot_state, text_color=color.orange, bgcolor=color.new(#301a0a, 0), text_size=_szCmd)
+
+    table.cell(adv, 0, 1, "Rot Pressure", text_color=color.orange, text_size=_szCmd)
+    table.cell(adv, 1, 1, f_v72_pct(rot_pressure), text_color=color.white, text_size=_szCmd)
+    table.cell(adv, 0, 2, "Transfer Prob", text_color=color.orange, text_size=_szCmd)
+    table.cell(adv, 1, 2, f_v72_pct(rot_transferProbability), text_color=color.white, text_size=_szCmd)
+    table.cell(adv, 0, 3, "Ctrl Stability", text_color=color.orange, text_size=_szCmd)
+    table.cell(adv, 1, 3, f_v72_pct(rot_controlStability), text_color=color.white, text_size=_szCmd)
+
+    table.cell(adv, 0, 4, "MCE Align", text_color=color.orange, text_size=_szCmd)
+    table.cell(adv, 1, 4, f_v72_pct(mce_alignmentScore), text_color=color.white, text_size=_szCmd)
+    table.cell(adv, 0, 5, "HTF / Exec", text_color=color.orange, text_size=_szCmd)
+    table.cell(adv, 1, 5, f_v72_pct(mce_htfAlignmentScore) + " / " + f_v72_pct(mce_execAlignmentScore), text_color=color.white, text_size=_szCmd)
+    table.cell(adv, 0, 6, "TF Dir 1-4", text_color=color.orange, text_size=_szCmd)
+    table.cell(adv, 1, 6, str.tostring(mce_tf1_direction) + " " + str.tostring(mce_tf2_direction) + " " + str.tostring(mce_tf3_direction) + " " + str.tostring(mce_tf4_direction), text_color=color.white, text_size=_szCmd)
+    table.cell(adv, 0, 7, "Lifecycle %", text_color=color.orange, text_size=_szCmd)
+    table.cell(adv, 1, 7, str.tostring(mce_lifecycleProgress) + " (heuristic)", text_color=color.silver, text_size=_szCmd)
+
+    table.cell(adv, 0, 8, "TQE Raw", text_color=color.orange, text_size=_szCmd)
+    table.cell(adv, 1, 8, f_v72_pct(tqe_rawScore), text_color=color.white, text_size=_szCmd)
+    table.cell(adv, 0, 9, "Conf Breakdown", text_color=color.orange, text_size=_szCmd)
+    table.cell(adv, 1, 9, trc_confidenceBreakdown, text_color=color.silver, text_size=_szCmd)
+
+    table.cell(adv, 0, 10, "Secondary Attr", text_color=color.orange, text_size=_szCmd)
+    table.cell(adv, 1, 10, f_v72_px(eae_secondaryAttractorPrice) + " (" + f_v72_pct(eae_secondaryAttractorScore) + ")", text_color=color.aqua, text_size=_szCmd)
+    table.cell(adv, 0, 11, "Tertiary Attr", text_color=color.orange, text_size=_szCmd)
+    table.cell(adv, 1, 11, f_v72_px(eae_tertiaryAttractorPrice) + " (" + f_v72_pct(eae_tertiaryAttractorScore) + ")", text_color=color.aqua, text_size=_szCmd)
+
+    table.cell(adv, 0, 12, "FRZ ResolScore", text_color=color.orange, text_size=_szCmd)
+    table.cell(adv, 1, 12, f_v72_pct(frz_resolutionScore), text_color=color.white, text_size=_szCmd)
+    table.cell(adv, 0, 13, "FRZ Residual", text_color=color.orange, text_size=_szCmd)
+    table.cell(adv, 1, 13, f_v72_pct(frz_residualEnergy) + " | AttrW " + f_v72_pct(frz_attractorWeight), text_color=color.white, text_size=_szCmd)
+
+    table.cell(adv, 0, 14, "Decision Src", text_color=color.orange, text_size=_szCmd)
+    table.cell(adv, 1, 14, trc_decisionSource, text_color=color.silver, text_size=_szCmd)
+    table.cell(adv, 0, 15, "Wave Chain", text_color=color.orange, text_size=_szCmd)
+    table.cell(adv, 1, 15, trc_waveChain, text_color=color.silver, text_size=_szCmd)
+    table.cell(adv, 0, 16, "Delivery Chain", text_color=color.orange, text_size=_szCmd)
+    table.cell(adv, 1, 16, trc_deliveryChain + " | depth " + str.tostring(wr_activeRootId > 0 ? array.indexof(wr_waveId, wr_activeWaveId) >= 0 ? array.get(wr_waveDepth, array.indexof(wr_waveId, wr_activeWaveId)) : 0 : 0), text_color=color.silver, text_size=_szCmd)
+    table.cell(adv, 0, 17, "Expected Path", text_color=color.orange, text_size=_szCmd)
+    table.cell(adv, 1, 17, te_expectedPath, text_color=color.silver, text_size=_szCmd)
