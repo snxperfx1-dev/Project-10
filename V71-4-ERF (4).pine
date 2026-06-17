@@ -1869,8 +1869,8 @@ f_toCanonicalPhase(string rawPhase, bool isExpansionSide, bool isBull) =>
     _out
 
 f_classifyWave(string _rawPhase, int _dir, bool _expSide) =>
-    string _targetWave   = _dir >= 0 ? "Bullish Wave" : "Bearish Wave"
-    bool   _isBull       = _dir >= 0
+    string _targetWave   = _dir == 1 ? "Bullish Wave" : _dir == -1 ? "Bearish Wave" : "Neutral"
+    bool   _isBull       = _dir == 1
     string _currentPhase = f_toCanonicalPhase(_rawPhase, _expSide, _isBull)
     [_targetWave, _currentPhase]
 
