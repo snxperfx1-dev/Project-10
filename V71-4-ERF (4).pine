@@ -376,6 +376,13 @@ if not na(swPivL)
 bool bullBOS = not na(prevSwingHigh) and close > prevSwingHigh
 bool bearBOS = not na(prevSwingLow)  and close < prevSwingLow
 
+// Buffered CHoCH used to flip wave DIRECTION (displayWaveDir + Engine 1A spawn).
+// Requires close to CLEAR the swing by chochBufferATR*ATR — filters minor
+// counter-swings in choppy ranges that were whipsawing the wave direction.
+chochBufferATR = input.float(0.75, "Direction CHoCH Buffer (ATR)", group=GRP_STRUCT, minval=0.0, maxval=3.0, step=0.05)
+bool bullCHoCH = not na(prevSwingHigh) and close > prevSwingHigh + atr * chochBufferATR
+bool bearCHoCH = not na(prevSwingLow)  and close < prevSwingLow  - atr * chochBufferATR
+
 if useStrictStructure
     if isHH and isHL
         structBias := 1
@@ -528,9 +535,9 @@ var bool  recursiveComplete = false
 // `direction` (Engine 1A lifecycle owner) is left untouched; this drives DISPLAY.
 // ─────────────────────────────────────────────────────────────────────────────
 var int displayWaveDir = 0
-if bullBOS
+if bullCHoCH
     displayWaveDir := 1
-if bearBOS
+if bearCHoCH
     displayWaveDir := -1
 if displayWaveDir == 0 and direction != 0
     displayWaveDir := direction
@@ -2094,8 +2101,8 @@ bool _hasActiveContext = direction != 0 and not na(flipTop)
 // valid structural trigger to flip the wave — Structure = Trigger. This no longer
 // requires an "elite impulse", so `direction` (and therefore phase, trades and all
 // displays) tracks the structure responsively instead of staying stale-bullish.
-bool _structFlipDown   = direction == 1  and bearBOS
-bool _structFlipUp     = direction == -1 and bullBOS
+bool _structFlipDown   = direction == 1  and bearCHoCH
+bool _structFlipUp     = direction == -1 and bullCHoCH
 bool _isReversal       = (eliteLongImpulse  and direction == -1) or (eliteShortImpulse and direction == 1) or _structFlipUp or _structFlipDown
 bool _allowSpawn       = (eliteLongImpulse or eliteShortImpulse or _structFlipUp or _structFlipDown) and (not _hasActiveContext or _isReversal)
 
