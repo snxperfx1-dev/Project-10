@@ -2090,11 +2090,17 @@ f_spawnWave(int _newDir) =>
     [_obTop, _obBot, _anchBar, _fzIP, _fzL, _fzH]
 
 bool _hasActiveContext = direction != 0 and not na(flipTop)
-bool _isReversal       = (eliteLongImpulse  and direction == -1) or (eliteShortImpulse and direction == 1)
-bool _allowSpawn       = (eliteLongImpulse or eliteShortImpulse) and (not _hasActiveContext or _isReversal)
+// Structural CHoCH against the active wave (protected-swing break) is itself a
+// valid structural trigger to flip the wave — Structure = Trigger. This no longer
+// requires an "elite impulse", so `direction` (and therefore phase, trades and all
+// displays) tracks the structure responsively instead of staying stale-bullish.
+bool _structFlipDown   = direction == 1  and bearBOS
+bool _structFlipUp     = direction == -1 and bullBOS
+bool _isReversal       = (eliteLongImpulse  and direction == -1) or (eliteShortImpulse and direction == 1) or _structFlipUp or _structFlipDown
+bool _allowSpawn       = (eliteLongImpulse or eliteShortImpulse or _structFlipUp or _structFlipDown) and (not _hasActiveContext or _isReversal)
 
 if _allowSpawn
-    int _newDir = eliteLongImpulse ? 1 : -1
+    int _newDir = eliteLongImpulse ? 1 : eliteShortImpulse ? -1 : _structFlipUp ? 1 : -1
     [_obTop, _obBot, _anchBar, _fzIP, _fzL, _fzH] = f_spawnWave(_newDir)
 
     lastSpawnDir       := _newDir
