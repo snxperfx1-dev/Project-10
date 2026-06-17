@@ -2112,6 +2112,15 @@ if _allowSpawn
     entryCycle               := 0
     waveDepth                := 0
 
+    // Entry-cycle label for the PRIMARY wave (DIE-8 only labels recursive cycles).
+    // Gated by the "Show Wave Intelligence Labels" setting so it always appears
+    // for a new wave regardless of Display Mode.
+    if showLabels
+        label.new(bar_index, _newDir == 1 ? low - atr * 0.6 : high + atr * 0.6,
+             "ENTRY CYCLE 0  " + (_newDir == 1 ? "▲ Long" : "▼ Short"),
+             style=_newDir == 1 ? label.style_label_up : label.style_label_down,
+             textcolor=color.black, color=color.new(#00ff88, 25), size=size.tiny)
+
     if not na(p4Box)
         box.delete(p4Box)
     if showP4Box
@@ -2160,14 +2169,10 @@ if _allowSpawn
 
     if not na(flipBox)
         box.delete(flipBox)
-    // Section 9: "Imbalance" / "Liquidation" categories gate the flip-zone
-    // box visibility (the flip zone represents the liquidation/imbalance
-    // retest region). The box object is always created for downstream
-    // structure logic; only its visual opacity is affected.
-    bool _flipVisible = ecvShow_Imbalance or ecvShow_Liquidation
+    // Flip-zone box kept as an invisible object for downstream structure logic
+    // (its green fill was removed for a cleaner chart).
     flipBox := box.new(left=_anchBar, top=flipTop, right=bar_index + 300, bottom=flipBot,
-         bgcolor=_flipVisible ? (_newDir == 1 ? color.new(color.teal, 92) : color.new(color.red, 92)) : color.new(color.black, 100),
-         border_color=_flipVisible ? (_newDir == 1 ? color.teal : color.red) : color.new(color.black, 100), border_width=1)
+         bgcolor=color.new(color.black, 100), border_color=color.new(color.black, 100), border_width=1)
 
 if direction == 1 and high > nz(cycleHigh, high)
     cycleHigh := high
@@ -2310,19 +2315,14 @@ if recursiveJustFired
         p4LineBot := line.new(x1=_anchBar2, y1=_obBot2, x2=bar_index + 300, y2=_obBot2,
              color=color.new(color.orange, 20), style=line.style_dotted, width=1)
 
+    // Supply/Demand zone boxes removed (replaced by the clean Primary-Attractor
+    // entry zone). Delete any legacy boxes so toggling no longer leaves them.
     if not na(demandBox)
         box.delete(demandBox)
+        demandBox := na
     if not na(supplyBox)
         box.delete(supplyBox)
-    if showSDZones
-        if _nextDir == 1 and ecvShow_Demand
-            demandBox := box.new(left=_anchBar2, top=_obTop2, right=bar_index + 300, bottom=_obBot2,
-                 bgcolor=color.new(color.teal, 92),
-                 border_color=color.new(color.teal, 30), border_width=1)
-        else if _nextDir == -1 and ecvShow_Supply
-            supplyBox := box.new(left=_anchBar2, top=_obTop2, right=bar_index + 300, bottom=_obBot2,
-                 bgcolor=color.new(color.red, 92),
-                 border_color=color.new(color.red, 30), border_width=1)
+        supplyBox := na
 
     // DIE: Entry Cycle label now rendered by Display Intelligence Engine (DIE-8)
     // Original label suppressed here — size-scaled, quality-scored label fires in DIE-8
@@ -2334,10 +2334,8 @@ if recursiveJustFired
 
     if not na(flipBox)
         box.delete(flipBox)
-    bool _flipVisible2 = ecvShow_Imbalance or ecvShow_Liquidation
     flipBox := box.new(left=_anchBar2, top=flipTop, right=bar_index + 300, bottom=flipBot,
-         bgcolor=_flipVisible2 ? (_nextDir == 1 ? color.new(color.teal, 92) : color.new(color.red, 92)) : color.new(color.black, 100),
-         border_color=_flipVisible2 ? (_nextDir == 1 ? color.teal : color.red) : color.new(color.black, 100), border_width=1)
+         bgcolor=color.new(color.black, 100), border_color=color.new(color.black, 100), border_width=1)
 
 var float retestHigh = na
 var float retestLow  = na
