@@ -1225,6 +1225,7 @@ float re_revisitProbability =
 // Distance to attractor uses existing geometric calculations.
 
 float eae_primaryAttractorPrice =
+     direction == 0 ? na :
      re_resolutionState == "UNRESOLVED" ?
           (direction == 1 ? nz(flipBot, close - atr * 2.0) : nz(flipTop, close + atr * 2.0)) :
      re_resolutionState == "PARTIALLY RESOLVED" ?
@@ -1232,7 +1233,7 @@ float eae_primaryAttractorPrice =
           na
 
 float eae_secondaryAttractorPrice =
-     re_resolutionState == "UNRESOLVED" and not na(inducZoneLow) and not na(inducZoneHigh) ?
+     direction != 0 and re_resolutionState == "UNRESOLVED" and not na(inducZoneLow) and not na(inducZoneHigh) ?
           (direction == 1 ? nz(inducZoneLow, na) : nz(inducZoneHigh, na)) : na
 
 // Attractor scoring — weighted by residual energy, timeframe weight, termination strength
@@ -4352,10 +4353,7 @@ int _l3R_near = bar_index + 3
 // Label text mirrors the dashboard "L2 (HTF) Progress" row exactly.
 if showTraceZones and barstate.islast and not na(l2_zoneHigh) and not na(l2_zoneLow)
 
-    string _l2txt = "L2 HTF ORIGIN (" + tf2 + "m)\n" +
-         "What Wave Price Is Trying To Make:\n" + l2_targetWave + "\n" +
-         "Current Phase Within Curve Cycle:\n" + l2_currentPhase +
-         "\nDom: " + str.tostring(math.round(l2_dominance)) + "%"
+    string _l2txt = "L2 HTF " + tf2 + "m · " + l2_targetWave + " · " + l2_currentPhase + " · D" + str.tostring(math.round(l2_dominance)) + "%"
 
     if na(l2ZoneBox)
         l2ZoneBox := box.new(_l2R_near, l2_zoneHigh, _l2R_far, l2_zoneLow,
@@ -4383,10 +4381,7 @@ if showTraceZones and barstate.islast and not na(l2_zoneHigh) and not na(l2_zone
 if showL0Zone and not na(point4OriginBar) and not na(point4OriginHigh) and not na(point4OriginLow)
 
     // _l0phase = waveProgressCanonical (used for label text below)
-    string _l0txt = "L0 PRIMARY ORIGIN\n" +
-         "What Wave Price Is Trying To Make:\n" + l0_targetWave + "\n" +
-         "Current Phase Within Curve Cycle:\n" + l0_currentPhase +
-         "\nDom: " + str.tostring(math.round(nz(l0_dominance, 0.0))) + "%"
+    string _l0txt = "L0 PRIMARY · " + l0_targetWave + " · " + l0_currentPhase + " · D" + str.tostring(math.round(nz(l0_dominance, 0.0))) + "%"
 
     // Zone box: origin → now (the actual L0 wave span)
     if na(l0ZoneBox)
@@ -4412,7 +4407,7 @@ if showL0Zone and not na(point4OriginBar) and not na(point4OriginHigh) and not n
         if na(l0OriginPin)
             l0OriginPin := label.new(point4OriginBar,
                  direction == 1 ? point4OriginLow : point4OriginHigh,
-                 "L0 PRIMARY\nORIGIN",
+                 "L0",
                  style=direction == 1 ? label.style_label_up : label.style_label_down,
                  color=color.new(trace_L0_col, 15),
                  textcolor=color.black, size=size.tiny)
@@ -4457,10 +4452,7 @@ if showL0Zone and not na(point4OriginBar) and not na(point4OriginHigh) and not n
 // Narrower than L2, wider than L3 — hierarchy is readable at a glance.
 if showTraceZones and barstate.islast and not na(l1_zoneHigh) and not na(l1_zoneLow)
 
-    string _l1txt = "L1 CHILD ORIGIN (" + tf1 + "m)\n" +
-         "What Wave Price Is Trying To Make:\n" + l1_targetWave + "\n" +
-         "Current Phase Within Curve Cycle:\n" + l1_currentPhase +
-         "\nDom: " + str.tostring(math.round(l1_dominance)) + "%"
+    string _l1txt = "L1 " + tf1 + "m · " + l1_targetWave + " · " + l1_currentPhase + " · D" + str.tostring(math.round(l1_dominance)) + "%"
 
     if na(l1ZoneBox)
         l1ZoneBox := box.new(_l1R_near, l1_zoneHigh, _l1R_far, l1_zoneLow,
@@ -4492,10 +4484,7 @@ if showTraceZones and barstate.islast and not na(l1_zoneHigh) and not na(l1_zone
 // DO NOT redesign L3 — display only. Narrow band nearest to price action.
 if showTraceZones and barstate.islast and not na(l3_zoneHigh) and not na(l3_zoneLow)
 
-    string _l3txt = "L3 MICRO ORIGIN\n" +
-         "What Wave Price Is Trying To Make:\n" + l3_targetWave + "\n" +
-         "Current Phase Within Curve Cycle:\n" + l3_currentPhase +
-         "\nDom: " + str.tostring(math.round(l3_dominance)) + "%"
+    string _l3txt = "L3 M1 · " + l3_targetWave + " · " + l3_currentPhase + " · D" + str.tostring(math.round(l3_dominance)) + "%"
 
     if na(l3ZoneBox)
         l3ZoneBox := box.new(_l3R_near, l3_zoneHigh, _l3R_far, l3_zoneLow,
@@ -4579,7 +4568,7 @@ if showDominantTag and barstate.islast
     // Anchor bar: right edge of the dominant structure
     int _domBar = bar_index
 
-    string _domTxt = "DOMINANT WAVE\n" + dominantWaveLevel
+    string _domTxt = "DOM: " + dominantWaveLevel
 
     if na(dominantLabel)
         dominantLabel := label.new(_domBar, _domMid, _domTxt,
@@ -5378,9 +5367,9 @@ f_v72_run(int _dir3, int _dir4, array<float> _cf, array<int> _ci, array<bool> _c
         table.cell(cmd, 0, 5, "Trade Type", text_color=#00ffcc, text_size=_szCmd)
         table.cell(cmd, 1, 5, doe_tradeType, text_color=color.white, text_size=_szCmd)
         table.cell(cmd, 0, 6, "Entry Zone", text_color=#00ffcc, text_size=_szCmd)
-        table.cell(cmd, 1, 6, f_v72_px(doe_entryLow) + " – " + f_v72_px(doe_entryHigh), text_color=color.white, text_size=_szCmd)
+        table.cell(cmd, 1, 6, (doe_action == "Long" or doe_action == "Short") ? (f_v72_px(doe_entryLow) + " – " + f_v72_px(doe_entryHigh)) : "–", text_color=color.white, text_size=_szCmd)
         table.cell(cmd, 0, 7, "Entry Trigger", text_color=#00ffcc, text_size=_szCmd)
-        table.cell(cmd, 1, 7, doe_entryTrigger, text_color=color.silver, text_size=_szCmd)
+        table.cell(cmd, 1, 7, (doe_action == "Long" or doe_action == "Short") ? doe_entryTrigger : "–", text_color=color.silver, text_size=_szCmd)
         table.cell(cmd, 0, 8, "Trade Quality", text_color=#00ffcc, text_size=_szCmd)
         table.cell(cmd, 1, 8, tqe_grade + " (prov)", text_color=color.black, bgcolor=f_v72_gradeCol(tqe_grade), text_size=_szCmd)
         table.cell(cmd, 0, 9, "Risk Level", text_color=#00ffcc, text_size=_szCmd)
@@ -5402,7 +5391,7 @@ f_v72_run(int _dir3, int _dir4, array<float> _cf, array<int> _ci, array<bool> _c
         table.cell(cmd, 0, 17, "FRZ Distance", text_color=#00ffcc, text_size=_szCmd)
         table.cell(cmd, 1, 17, na(frz_distanceToZone) ? "–" : f_v72_num(frz_distanceToZone, 2) + " ATR", text_color=color.silver, text_size=_szCmd)
         table.cell(cmd, 0, 18, "Primary Attractor", text_color=#00ffcc, text_size=_szCmd)
-        table.cell(cmd, 1, 18, f_v72_px(eae_primaryAttractorPrice) + "  " + eae_primaryAttractorLabel, text_color=color.aqua, text_size=_szCmd)
+        table.cell(cmd, 1, 18, na(eae_primaryAttractorPrice) ? "–" : (f_v72_px(eae_primaryAttractorPrice) + "  " + eae_primaryAttractorLabel), text_color=color.aqua, text_size=_szCmd)
         table.cell(cmd, 0, 19, "Convergence", text_color=#00ffcc, text_size=_szCmd)
         table.cell(cmd, 1, 19, frz_attractorConvergence ? "● ACTIVE" : "○ none", text_color=frz_attractorConvergence ? #00ffcc : color.gray, text_size=_szCmd)
         table.cell(cmd, 0, 20, "HTF Read", text_color=#00ffcc, text_size=_szCmd)
