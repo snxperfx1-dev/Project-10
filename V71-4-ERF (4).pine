@@ -278,15 +278,14 @@ f_htfBeliefs(float _open, float _high, float _low, float _close,
     bool  _bullImp   = _eff > _effT and _vel_htf > _vel_htf[1] and _acc_htf > 0 and _close > _open and _disp > _dispT
     bool  _bearImp   = _eff > _effT and _vel_htf < _vel_htf[1] and _acc_htf < 0 and _close < _open and _disp > _dispT
     int   _dir       = _bullImp ? 1 : _bearImp ? -1 : 0
-    float _dispStr   = math.min(_disp / math.max(_dispT, 1e-10), 3.0)
 
-    [_dir, _dispStr, _expScore, _decayScr, _curvScr, _abScr, _liqScr]
+    [_dir, _expScore, _decayScr, _curvScr, _abScr, _liqScr]
 
-[raw_dir_tf1, raw_disp_tf1, raw_expScr_tf1, raw_decScr_tf1, raw_curvScr_tf1, raw_abScr_tf1, raw_liqScr_tf1] = request.security(syminfo.tickerid, tf1,
+[raw_dir_tf1, raw_expScr_tf1, raw_decScr_tf1, raw_curvScr_tf1, raw_abScr_tf1, raw_liqScr_tf1] = request.security(syminfo.tickerid, tf1,
     f_htfBeliefs(open, high, low, close, effThresh, dispThresh, acceptBars, convMult, obLookback),
     lookahead=barmerge.lookahead_off)
 
-[raw_dir_tf2, raw_disp_tf2, raw_expScr_tf2, raw_decScr_tf2, raw_curvScr_tf2, raw_abScr_tf2, raw_liqScr_tf2] = request.security(syminfo.tickerid, tf2,
+[raw_dir_tf2, raw_expScr_tf2, raw_decScr_tf2, raw_curvScr_tf2, raw_abScr_tf2, raw_liqScr_tf2] = request.security(syminfo.tickerid, tf2,
     f_htfBeliefs(open, high, low, close, effThresh, dispThresh, acceptBars, convMult, obLookback),
     lookahead=barmerge.lookahead_off)
 
@@ -3326,22 +3325,10 @@ string _szA = _ts == "tiny" ? size.tiny : size.small
 // ─────────────────────────────────────────────────────────────────────────────
 // DASHBOARD PANELS A/B/C/FU — wrapped in function to satisfy body-length limit
 // ─────────────────────────────────────────────────────────────────────────────
-f_renderDashABC() =>
+f_renderDashA() =>
     if showTable
         // ── PANEL A: Command Center (top_right) ──────────────────────────────────
         var table dashA = table.new(position.top_right, 2, 26,
-             bgcolor=color.new(#0a0a12, 5),
-             border_color=color.new(color.white, 30), border_width=1,
-             frame_color=color.new(color.white, 20), frame_width=1)
-
-        // ── PANEL B: Belief Distributions (bottom_right) ─────────────────────────
-        var table dashB = table.new(position.bottom_right, 2, 30,
-             bgcolor=color.new(#0a0a12, 5),
-             border_color=color.new(color.white, 30), border_width=1,
-             frame_color=color.new(color.white, 20), frame_width=1)
-
-        // ── PANEL C: Intelligence Engine (top_left) ───────────────────────────────
-        var table dashC = table.new(position.middle_left, 2, 80,
              bgcolor=color.new(#0a0a12, 5),
              border_color=color.new(color.white, 30), border_width=1,
              frame_color=color.new(color.white, 20), frame_width=1)
@@ -3525,6 +3512,16 @@ f_renderDashABC() =>
                  text_color=f_sc(velocityScore), text_size=_szA)
             _ra := _ra + 1
 
+// ─────────────────────────────────────────────────────────────────────────────
+// DASHBOARD PANEL B — split out to satisfy per-function external-element limit
+// ─────────────────────────────────────────────────────────────────────────────
+f_renderDashB() =>
+    if showTable
+        var table dashB = table.new(position.bottom_right, 2, 30,
+             bgcolor=color.new(#0a0a12, 5),
+             border_color=color.new(color.white, 30), border_width=1,
+             frame_color=color.new(color.white, 20), frame_width=1)
+
         // ════ PANEL B ═════════════════════════════════════════════════════════════
         int _rb = 0
 
@@ -3693,6 +3690,16 @@ f_renderDashABC() =>
                  text_color=geoFullConvexityPossible ? color.lime : geoPartialConvexityPossible ? color.yellow : color.orange,
                  text_size=_szA)
             _rb := _rb + 1
+
+// ─────────────────────────────────────────────────────────────────────────────
+// DASHBOARD PANEL C / DIE / ERF / FU — split out to satisfy external-element limit
+// ─────────────────────────────────────────────────────────────────────────────
+f_renderDashCF() =>
+    if showTable
+        var table dashC = table.new(position.middle_left, 2, 80,
+             bgcolor=color.new(#0a0a12, 5),
+             border_color=color.new(color.white, 30), border_width=1,
+             frame_color=color.new(color.white, 20), frame_width=1)
 
         // ════ PANEL C ═════════════════════════════════════════════════════════════
         int _rc = 0
@@ -4910,7 +4917,9 @@ f_renderDashP3() =>
 // ═══════════════════════════════════════════════════════════════════════════════
 // ── Phase 3 high-conviction alert ─────────────────────────────────────────────
 // ── Dashboard & P3 render calls ─────────────────────────────────────────────
-f_renderDashABC()
+f_renderDashA()
+f_renderDashB()
+f_renderDashCF()
 f_renderDashP3()
 
 bool p3_highConvictionSetup =
