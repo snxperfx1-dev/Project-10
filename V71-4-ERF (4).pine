@@ -519,6 +519,23 @@ var int   waveDepth         = 0
 var int   lastSpawnDir      = 0
 var bool  recursiveComplete = false
 
+// ─────────────────────────────────────────────────────────────────────────────
+// displayWaveDir — STRUCTURAL "wave being created" (Structure = Trigger; RC4)
+// Driven ONLY by protected-swing breaks (bullBOS/bearBOS). No momentum/belief/
+// physics, so it complies with the lifecycle hierarchy while staying responsive:
+// when a wave's structure breaks the other way, the DISPLAYED emerging wave flips
+// immediately — even before Engine 1A `direction` flips on an elite impulse.
+// `direction` (Engine 1A lifecycle owner) is left untouched; this drives DISPLAY.
+// ─────────────────────────────────────────────────────────────────────────────
+var int displayWaveDir = 0
+if bullBOS
+    displayWaveDir := 1
+if bearBOS
+    displayWaveDir := -1
+if displayWaveDir == 0 and direction != 0
+    displayWaveDir := direction
+string displayWaveDirStr = displayWaveDir == 1 ? "Bullish Wave" : displayWaveDir == -1 ? "Bearish Wave" : "Neutral"
+
 float _g_highestAB = ta.highest(high, acceptBars)
 float _g_lowestAB  = ta.lowest (low,  acceptBars)
 
@@ -1877,7 +1894,7 @@ f_classifyWave(string _rawPhase, int _dir, bool _expSide) =>
 // ── L0 PRIMARY: assigned exclusively from ENGINE 1A ──────────────────────────
 // ENGINE 1A is the sole lifecycle authority — l0_targetWave and l0_currentPhase
 // must not be derived from primaryHypothesis, waveProgress, or any score.
-string l0_targetWave   = ie1a_waveDirection   // "Bullish Wave" | "Bearish Wave"
+string l0_targetWave   = displayWaveDirStr   // wave being CREATED (structural, RC4)
 string l0_currentPhase = ie1a_currentPhase    // canonical lifecycle phase from IE1A
 
 // ── 12E: PREDICTION ENGINE ────────────────────────────────────────────────────
@@ -2351,10 +2368,15 @@ int  barsSinceCont = not na(contBar) ? bar_index - contBar : (not na(obBirthBar)
 bool bullInvalid   = direction ==  1 and close < flipBot - atr * 0.5
 bool bearInvalid   = direction == -1 and close > flipTop + atr * 0.5
 bool opposingMove  = (direction ==  1 and bearImpulse) or (direction == -1 and bullImpulse)
-bool safeToReset   = barsSinceCont > resetBars and (opposingMove or bullInvalid or bearInvalid) and
+// Hard structural invalidation (wave origin broken) ALWAYS resets — a structurally
+// dead wave must not persist as the active direction, regardless of ERF dissipation
+// suppression. The softer rotation-based reset keeps its existing gates.
+bool hardInvalid   = bullInvalid or bearInvalid
+bool softReset     = barsSinceCont > resetBars and opposingMove and
      (ie1a_currentPhase != "Demand Return" and ie1a_currentPhase != "Supply Return") and
      demandReturnBelief < 30 and expansionBelief < 30 and
-     not erf_suppressRotation   // ERF: suppress reset when active dissipation is occurring
+     not erf_suppressRotation
+bool safeToReset   = hardInvalid or softReset
 
 if direction != 0 and safeToReset
     direction              := 0
@@ -3434,14 +3456,15 @@ f_renderDashA() =>
             table.cell(dashA, 0, _ra, "Direction",
                  text_color=color.silver, text_size=_szA)
             table.cell(dashA, 1, _ra,
-                 direction == 1 ? "Long ▲" : direction == -1 ? "Short ▼" : "None",
-                 text_color=direction == 1 ? color.teal : direction == -1 ? color.red : color.gray,
+                 displayWaveDir == 1 ? "Long ▲" : displayWaveDir == -1 ? "Short ▼" : "None",
+                 text_color=displayWaveDir == 1 ? color.teal : displayWaveDir == -1 ? color.red : color.gray,
                  text_size=_szA)
             _ra := _ra + 1
             table.cell(dashA, 0, _ra, "Structure",
                  text_color=color.silver, text_size=_szA)
-            table.cell(dashA, 1, _ra, stStr,
-                 text_color=structBias == 1 ? color.lime : structBias == -1 ? color.red : color.gray,
+            table.cell(dashA, 1, _ra,
+                 displayWaveDir == 1 ? "Bull ▲" : displayWaveDir == -1 ? "Bear ▼" : "Neutral",
+                 text_color=displayWaveDir == 1 ? color.lime : displayWaveDir == -1 ? color.red : color.gray,
                  text_size=_szA)
             _ra := _ra + 1
             bool dirStructAlign = direction != 0 and direction == structBias
@@ -3959,9 +3982,9 @@ bool _l2_expSide = l2_dominantPhase == "Expansion" or l2_dominantPhase == "Pre-C
 bool _l3_expSide = l3_dominantPhase == "M1 Expansion" or l3_dominantPhase == "M1 Exp Weak" or l3_dominantPhase == "M1 Convexity" or l3_dominantPhase == "M1 Liquidity"
 
 // ── Run classifier for L1 / L2 / L3 (L0 was run earlier) ─────────────────────
-[l1_targetWave, l1_currentPhase] = f_classifyWave(l1_dominantPhase, dir_tf1 != 0 ? dir_tf1 : direction, _l1_expSide)
-[l2_targetWave, l2_currentPhase] = f_classifyWave(l2_dominantPhase, dir_tf2 != 0 ? dir_tf2 : direction, _l2_expSide)
-[l3_targetWave, l3_currentPhase] = f_classifyWave(l3_dominantPhase, direction, _l3_expSide)
+[l1_targetWave, l1_currentPhase] = f_classifyWave(l1_dominantPhase, dir_tf1 != 0 ? dir_tf1 : displayWaveDir, _l1_expSide)
+[l2_targetWave, l2_currentPhase] = f_classifyWave(l2_dominantPhase, dir_tf2 != 0 ? dir_tf2 : displayWaveDir, _l2_expSide)
+[l3_targetWave, l3_currentPhase] = f_classifyWave(l3_dominantPhase, displayWaveDir, _l3_expSide)
 
 // waveProgressCanonical — now sourced directly from ENGINE 1A.
 // ENGINE 1A is the sole lifecycle authority; score-based thresholds are prohibited
