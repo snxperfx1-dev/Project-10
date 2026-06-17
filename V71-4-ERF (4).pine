@@ -1315,6 +1315,35 @@ bool erf_entryGate = not erfGateEnabled or erf_tradeReadiness >= erfEntryThresho
 // ═══════════════════════════════════════════════════════════════════════════════
 
 // ═══════════════════════════════════════════════════════════════════════════════
+// HIGH-PROBABILITY ENTRY ZONE (Primary Attractor) — clean persistent chart marker
+// One tidy band drawn at the primary attractor (the highest-probability
+// return/entry level), always visible while a directional wave exists. This
+// replaces the old supply/demand boxes and keeps the chart uncluttered.
+// ═══════════════════════════════════════════════════════════════════════════════
+showEntryZone   = input.bool (true, "Show High-Probability Entry Zone", group=GRP_ERF)
+entryZoneWidthA = input.float(0.15, "Entry Zone Half-Width (ATR)",      group=GRP_ERF, minval=0.02, step=0.01)
+
+var box   ezBox = na
+var label ezLbl = na
+if barstate.islast
+    if not na(ezBox)
+        box.delete(ezBox)
+    if not na(ezLbl)
+        label.delete(ezLbl)
+    if showEntryZone and direction != 0 and not na(eae_primaryAttractorPrice)
+        float _ezMid = eae_primaryAttractorPrice
+        float _ezH   = _ezMid + atr * entryZoneWidthA
+        float _ezL   = _ezMid - atr * entryZoneWidthA
+        color _ezBg  = direction == 1 ? color.new(#00ffcc, 82) : color.new(#ff2244, 82)
+        color _ezBd  = direction == 1 ? color.new(#00ffcc, 15) : color.new(#ff2244, 15)
+        ezBox := box.new(bar_index - 2, _ezH, bar_index + 40, _ezL,
+             bgcolor=_ezBg, border_color=_ezBd, border_width=1, border_style=line.style_solid)
+        ezLbl := label.new(bar_index + 40, _ezMid,
+             "ENTRY ZONE  " + str.tostring(math.round(eae_primaryAttractorScore)) + "%  " + eae_primaryAttractorLabel,
+             style=label.style_label_left,
+             color=_ezBd, textcolor=color.white, size=size.small)
+
+// ═══════════════════════════════════════════════════════════════════════════════
 // SECTION 9 — PHYSICS OBSERVATION LAYER (declared before Engine 1A above)
 // ═══════════════════════════════════════════════════════════════════════════════
 // obs_ExpansionScore, obs_DecayScore, obs_CurvatureScore, obs_AbsorptionScore,
@@ -2100,19 +2129,15 @@ if _allowSpawn
         p4LineBot := line.new(x1=_anchBar, y1=_obBot, x2=bar_index + 300, y2=_obBot,
              color=color.new(color.orange, 20), style=line.style_dotted, width=1)
 
+    // Supply/Demand zone boxes removed — replaced by the clean, persistent
+    // Primary-Attractor entry zone (see "High-Probability Entry Zone" below).
+    // Delete any legacy S/D boxes so toggling no longer leaves them on chart.
     if not na(demandBox)
         box.delete(demandBox)
+        demandBox := na
     if not na(supplyBox)
         box.delete(supplyBox)
-    if showSDZones
-        if _newDir == 1 and ecvShow_Demand
-            demandBox := box.new(left=_anchBar, top=_obTop, right=bar_index + 300, bottom=_obBot,
-                 bgcolor=color.new(color.teal, 92),
-                 border_color=color.new(color.teal, 30), border_width=1)
-        else if _newDir == -1 and ecvShow_Supply
-            supplyBox := box.new(left=_anchBar, top=_obTop, right=bar_index + 300, bottom=_obBot,
-                 bgcolor=color.new(color.red, 92),
-                 border_color=color.new(color.red, 30), border_width=1)
+        supplyBox := na
 
     // DIE: POINT 4 ORIGIN label — only render at Priority 90 (not in High density execution mode)
     // In High density Execution mode this is suppressed; medium/low density shows it.
