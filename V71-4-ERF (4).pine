@@ -5158,12 +5158,12 @@ f_v72_run(int _dir3, int _dir4, array<float> _cf, array<int> _ci, array<bool> _c
     int   mce_tf2_direction = nz(dir_tf2)
     int   mce_tf3_direction = nz(_dir3)
     int   mce_tf4_direction = nz(_dir4)
-    int _mce_agreeAll  = (mce_tf1_direction == direction and direction != 0 ? 1 : 0) + (mce_tf2_direction == direction and direction != 0 ? 1 : 0) + (mce_tf3_direction == direction and direction != 0 ? 1 : 0) + (mce_tf4_direction == direction and direction != 0 ? 1 : 0)
-    int _mce_agreeHtf  = (mce_tf3_direction == direction and direction != 0 ? 1 : 0) + (mce_tf4_direction == direction and direction != 0 ? 1 : 0)
-    int _mce_agreeExec = (mce_tf1_direction == direction and direction != 0 ? 1 : 0) + (mce_tf2_direction == direction and direction != 0 ? 1 : 0)
-    float mce_alignmentScore     = direction == 0 ? 0.0 : _mce_agreeAll  / 4.0 * 100.0
-    float mce_htfAlignmentScore  = direction == 0 ? 0.0 : _mce_agreeHtf  / 2.0 * 100.0
-    float mce_execAlignmentScore = direction == 0 ? 0.0 : _mce_agreeExec / 2.0 * 100.0
+    int _mce_agreeAll  = (mce_tf1_direction == displayWaveDir and displayWaveDir != 0 ? 1 : 0) + (mce_tf2_direction == displayWaveDir and displayWaveDir != 0 ? 1 : 0) + (mce_tf3_direction == displayWaveDir and displayWaveDir != 0 ? 1 : 0) + (mce_tf4_direction == displayWaveDir and displayWaveDir != 0 ? 1 : 0)
+    int _mce_agreeHtf  = (mce_tf3_direction == displayWaveDir and displayWaveDir != 0 ? 1 : 0) + (mce_tf4_direction == displayWaveDir and displayWaveDir != 0 ? 1 : 0)
+    int _mce_agreeExec = (mce_tf1_direction == displayWaveDir and displayWaveDir != 0 ? 1 : 0) + (mce_tf2_direction == displayWaveDir and displayWaveDir != 0 ? 1 : 0)
+    float mce_alignmentScore     = displayWaveDir == 0 ? 0.0 : _mce_agreeAll  / 4.0 * 100.0
+    float mce_htfAlignmentScore  = displayWaveDir == 0 ? 0.0 : _mce_agreeHtf  / 2.0 * 100.0
+    float mce_execAlignmentScore = displayWaveDir == 0 ? 0.0 : _mce_agreeExec / 2.0 * 100.0
     int mce_lifecycleProgress =
          ie1a_currentPhase == "Point 4 Origin"           ? 5  :
          ie1a_currentPhase == "Expansion"                ? 20 :
@@ -5180,8 +5180,8 @@ f_v72_run(int _dir3, int _dir4, array<float> _cf, array<int> _ci, array<bool> _c
          ie1a_currentPhase == "Demand Return"            ? 90 :
          ie1a_currentPhase == "Supply Return"            ? 90 : 0
     string mce_htfAlignmentSummary =
-         mce_htfAlignmentScore >= 80 and direction == 1  ? "HTF Bullish Continuation" :
-         mce_htfAlignmentScore >= 80 and direction == -1 ? "HTF Bearish Continuation" :
+         mce_htfAlignmentScore >= 80 and displayWaveDir == 1  ? "HTF Bullish Continuation" :
+         mce_htfAlignmentScore >= 80 and displayWaveDir == -1 ? "HTF Bearish Continuation" :
          mce_htfAlignmentScore >= 60 and rot_transferProbability < 40 ? "HTF Trend Intact" :
          mce_htfAlignmentScore >= 50 and rot_transferProbability >= 60 ? "HTF Rotation Developing" :
          mce_htfAlignmentScore < 40 ? "HTF Contested — No Clear Bias" : "HTF Developing"
@@ -5196,15 +5196,17 @@ f_v72_run(int _dir3, int _dir4, array<float> _cf, array<int> _ci, array<bool> _c
     bool _ne_phasePullback = ie1a_currentPhase == "Retracement" or ie1a_currentPhase == "Retracement Pre-Convexity" or ie1a_currentPhase == "Retracement Induction" or ie1a_currentPhase == "Retracement Liquidity"
     bool _ne_phaseDemandReturn = ie1a_currentPhase == "Demand Return"
     bool _ne_phaseSupplyReturn = ie1a_currentPhase == "Supply Return"
-    float _ne_htfScore = mce_htfAlignmentScore > 0 ? mce_htfAlignmentScore : (htfAlign == direction and direction != 0 ? 70.0 : 0.0)
+    float _ne_htfScore = mce_htfAlignmentScore > 0 ? mce_htfAlignmentScore : (htfAlign == displayWaveDir and displayWaveDir != 0 ? 70.0 : 0.0)
     string ne_dominantNarrative =
-         direction == 1  and _ne_htfScore >= 70 and _ne_phaseExpBull and rot_transferProbability < 40 ? "Bullish Continuation" :
-         direction == -1 and _ne_htfScore >= 70 and _ne_phaseExpBear and rot_transferProbability < 40 ? "Bearish Continuation" :
-         direction == 1  and (_ne_phasePullback or _ne_phaseDemandReturn) and _ne_htfScore >= 55 ? "Bullish Pullback" :
-         direction == -1 and (_ne_phasePullback or _ne_phaseSupplyReturn) and _ne_htfScore >= 55 ? "Bearish Pullback" :
-         rot_transferProbability >= 65 and direction == -1 and _ne_htfScore >= 50 ? "Bullish Rotation" :
-         rot_transferProbability >= 65 and direction == 1  and _ne_htfScore >= 50 ? "Bearish Rotation" :
-         rot_state == "CONTESTED" and math.abs(mce_alignmentScore - 50) < 15 and re_resolutionState == "UNRESOLVED" ? "Range Development" : "No Clear Narrative"
+         displayWaveDir == 0 ? "No Clear Narrative" :
+         displayWaveDir == 1  and _ne_phaseExpBull and rot_transferProbability < 40 ? "Bullish Continuation" :
+         displayWaveDir == -1 and _ne_phaseExpBear and rot_transferProbability < 40 ? "Bearish Continuation" :
+         displayWaveDir == 1  and (_ne_phasePullback or _ne_phaseDemandReturn) ? "Bullish Pullback" :
+         displayWaveDir == -1 and (_ne_phasePullback or _ne_phaseSupplyReturn) ? "Bearish Pullback" :
+         displayWaveDir == 1  and (rot_transferProbability >= 55 or ie1a_currentPhase == "Absorption") ? "Bullish Reversal Developing" :
+         displayWaveDir == -1 and (rot_transferProbability >= 55 or ie1a_currentPhase == "Absorption") ? "Bearish Reversal Developing" :
+         displayWaveDir == 1  ? "Bullish Developing" :
+         displayWaveDir == -1 ? "Bearish Developing" : "No Clear Narrative"
     float ne_narrativeStrength = math.min(mce_alignmentScore * 0.40 + rot_controlStability * 0.30 + (re_resolutionState == "RESOLVED" ? 30.0 : re_resolutionState == "PARTIALLY RESOLVED" ? 15.0 : 0.0), 100.0)
 
     // ── V72.5 Invalidation Engine (C9) ───────────────────────────────────────
@@ -5262,10 +5264,10 @@ f_v72_run(int _dir3, int _dir4, array<float> _cf, array<int> _ci, array<bool> _c
 
     // ── V72.8 Decision Output Engine (C1, C6) ────────────────────────────────
     string doe_bias =
-         direction == 1  and mce_htfAlignmentScore >= 75 and rot_controlStability >= 65 ? "Strong Bullish" :
-         direction == 1  and mce_htfAlignmentScore >= 50 ? "Bullish" :
-         direction == -1 and mce_htfAlignmentScore >= 75 and rot_controlStability >= 65 ? "Strong Bearish" :
-         direction == -1 and mce_htfAlignmentScore >= 50 ? "Bearish" : "Neutral"
+         displayWaveDir == 1  and mce_htfAlignmentScore >= 75 and rot_controlStability >= 65 ? "Strong Bullish" :
+         displayWaveDir == 1  ? "Bullish" :
+         displayWaveDir == -1 and mce_htfAlignmentScore >= 75 and rot_controlStability >= 65 ? "Strong Bearish" :
+         displayWaveDir == -1 ? "Bearish" : "Neutral"
     string doe_action =
          inv_invalidated ? "No Trade" :
          not erf_entryGate ? "Wait" :
@@ -5286,6 +5288,44 @@ f_v72_run(int _dir3, int _dir4, array<float> _cf, array<int> _ci, array<bool> _c
     float doe_entryHigh = not na(doe_entryMid) ? doe_entryMid + atr * 0.30 : na
     float doe_entryLow  = not na(doe_entryMid) ? doe_entryMid - atr * 0.30 : na
     string doe_entryTrigger = frz_inProximity ? "Limit" : (ie1a_currentPhase == "Demand Return" or ie1a_currentPhase == "Supply Return") ? "LimitOnRetest" : "Market"
+
+    // ── V72.8b OPPORTUNITY PROGRESS ENGINE (Phase 1) ─────────────────────────
+    // Direction = displayWaveDir (single source). Progress SYNTHESIZES engine
+    // states; it never decides direction. Hard vetoes (no direction / invalidated)
+    // force Stand Down; ERF/HTF/phase/MCE are graded contributors, not vetoes.
+    float _opStruct    = displayWaveDir == 0 ? 0.0 : (direction == displayWaveDir ? 100.0 : 70.0)
+    float _opLifecycle =
+         ie1a_currentPhase == "Demand Return" or ie1a_currentPhase == "Supply Return" ? 100.0 :
+         ie1a_currentPhase == "Absorption" or ie1a_currentPhase == "Retracement" or ie1a_currentPhase == "Retracement Pre-Convexity" or ie1a_currentPhase == "Retracement Induction" or ie1a_currentPhase == "Retracement Liquidity" ? 70.0 :
+         ie1a_currentPhase == "New High" or ie1a_currentPhase == "New Low" ? 55.0 :
+         ie1a_currentPhase == "Expansion" or ie1a_currentPhase == "Expansion Pre-Convexity" or ie1a_currentPhase == "Expansion Induction" or ie1a_currentPhase == "Expansion Liquidity" ? 45.0 :
+         ie1a_currentPhase == "Point 4 Origin" ? 25.0 : 0.0
+    float _opRotation   = rot_transferProbability
+    float _opReturn     = na(frz_distanceToZone) ? (frz_inProximity ? 100.0 : 0.0) : math.max(0.0, 100.0 - frz_distanceToZone * 40.0)
+    float _opHtf        = mce_htfAlignmentScore
+    float _opDisplace   = math.max(re_recursiveCompletionScore, ede_dissipationProgress)
+    float _opConfluence = (frz_attractorConvergence ? 50.0 : 0.0) + ((frz_inProximity and frz_bestZoneDir == displayWaveDir) ? 50.0 : 0.0)
+    float oppProgressRaw = _opStruct * 0.25 + _opLifecycle * 0.15 + _opRotation * 0.15 + _opReturn * 0.15 + _opHtf * 0.10 + _opDisplace * 0.10 + _opConfluence * 0.10
+    bool  oppVeto     = displayWaveDir == 0 or inv_invalidated
+    float oppProgress = oppVeto ? 0.0 : oppProgressRaw
+    bool  _opInZone   = frz_inProximity and frz_bestZoneDir == displayWaveDir
+    string oppState =
+         oppVeto                                ? "STAND DOWN" :
+         oppProgress >= 95 and _opInZone        ? "TRADE ACTIVE" :
+         oppProgress >= 85                      ? "PREPARE TO EXECUTE" :
+         oppProgress >= 60                      ? "OPPORTUNITY CONFIRMING" :
+         oppProgress >= 20                      ? "OPPORTUNITY FORMING" : "STAND DOWN"
+
+    // Synthesized intelligence narrative (consumes displayWaveDir + lifecycle + rotation)
+    string _cmdDirWord = displayWaveDir == 1 ? "Bullish" : displayWaveDir == -1 ? "Bearish" : "Neutral"
+    string cmd_narrative =
+         displayWaveDir == 0 ? "No directional thesis" :
+         inv_invalidated ? _cmdDirWord + " thesis invalidated" :
+         (ie1a_currentPhase == "Demand Return" or ie1a_currentPhase == "Supply Return") ? _cmdDirWord + " return-to-zone — execution window" :
+         rot_transferProbability >= 55 or ie1a_currentPhase == "Absorption" ? _cmdDirWord + " reversal developing" :
+         (_ne_phasePullback or ie1a_currentPhase == "Retracement") ? _cmdDirWord + " pullback in progress" :
+         (ie1a_currentPhase == "Expansion" or ie1a_currentPhase == "New High" or ie1a_currentPhase == "New Low") ? _cmdDirWord + " continuation" :
+         _cmdDirWord + " developing"
 
     // ── V72.9 Wave Registry (C5, C12) — var locals persist (single call site) ─
     var array<int>    wr_waveId          = array.new_int()
@@ -5407,21 +5447,21 @@ f_v72_run(int _dir3, int _dir4, array<float> _cf, array<int> _ci, array<bool> _c
     if barstate.islast and showTable and showV72Command
         var table cmd = table.new(position.middle_right, 2, 22, bgcolor=color.new(#05050f, 0), border_color=color.new(#00ffcc, 40), border_width=1, frame_color=color.new(#00ffcc, 10), frame_width=1)
         table.cell(cmd, 0, 0, "V72 COMMAND", text_color=color.white, bgcolor=color.new(#0a0a30, 0), text_size=_szCmd)
-        table.cell(cmd, 1, 0, doe_action, text_color=color.black, bgcolor=f_v72_actionCol(doe_action), text_size=_szCmd)
+        table.cell(cmd, 1, 0, oppState, text_color=color.black, bgcolor=(oppState == "TRADE ACTIVE" ? #00ff88 : oppState == "PREPARE TO EXECUTE" ? color.lime : oppState == "OPPORTUNITY CONFIRMING" ? color.yellow : oppState == "OPPORTUNITY FORMING" ? color.orange : color.gray), text_size=_szCmd)
         table.cell(cmd, 0, 1, "Bias", text_color=#00ffcc, text_size=_szCmd)
-        table.cell(cmd, 1, 1, doe_bias, text_color=color.white, text_size=_szCmd)
+        table.cell(cmd, 1, 1, doe_bias, text_color=(displayWaveDir == 1 ? color.lime : displayWaveDir == -1 ? color.red : color.gray), text_size=_szCmd)
         table.cell(cmd, 0, 2, "Narrative", text_color=#00ffcc, text_size=_szCmd)
-        table.cell(cmd, 1, 2, ne_dominantNarrative, text_color=color.white, text_size=_szCmd)
-        table.cell(cmd, 0, 3, "Narr Strength", text_color=#00ffcc, text_size=_szCmd)
-        table.cell(cmd, 1, 3, f_v72_pct(ne_narrativeStrength), text_color=color.silver, text_size=_szCmd)
+        table.cell(cmd, 1, 2, cmd_narrative, text_color=color.white, text_size=_szCmd)
+        table.cell(cmd, 0, 3, "Opportunity", text_color=#00ffcc, text_size=_szCmd)
+        table.cell(cmd, 1, 3, f_v72_pct(oppProgress) + "  " + oppState, text_color=(oppProgress >= 85 ? #00ff88 : oppProgress >= 60 ? color.yellow : oppProgress >= 20 ? color.orange : color.gray), text_size=_szCmd)
         table.cell(cmd, 0, 4, "Confidence", text_color=#00ffcc, text_size=_szCmd)
         table.cell(cmd, 1, 4, f_v72_pct(doe_confidence), text_color=color.white, text_size=_szCmd)
         table.cell(cmd, 0, 5, "Trade Type", text_color=#00ffcc, text_size=_szCmd)
         table.cell(cmd, 1, 5, doe_tradeType, text_color=color.white, text_size=_szCmd)
         table.cell(cmd, 0, 6, "Entry Zone", text_color=#00ffcc, text_size=_szCmd)
-        table.cell(cmd, 1, 6, (doe_action == "Long" or doe_action == "Short") ? (f_v72_px(doe_entryLow) + " – " + f_v72_px(doe_entryHigh)) : "–", text_color=color.white, text_size=_szCmd)
+        table.cell(cmd, 1, 6, (oppState == "PREPARE TO EXECUTE" or oppState == "TRADE ACTIVE") ? (f_v72_px(doe_entryLow) + " – " + f_v72_px(doe_entryHigh)) : "–", text_color=color.white, text_size=_szCmd)
         table.cell(cmd, 0, 7, "Entry Trigger", text_color=#00ffcc, text_size=_szCmd)
-        table.cell(cmd, 1, 7, (doe_action == "Long" or doe_action == "Short") ? doe_entryTrigger : "–", text_color=color.silver, text_size=_szCmd)
+        table.cell(cmd, 1, 7, (oppState == "PREPARE TO EXECUTE" or oppState == "TRADE ACTIVE") ? doe_entryTrigger : "–", text_color=color.silver, text_size=_szCmd)
         table.cell(cmd, 0, 8, "Trade Quality", text_color=#00ffcc, text_size=_szCmd)
         table.cell(cmd, 1, 8, tqe_grade + " (prov)", text_color=color.black, bgcolor=f_v72_gradeCol(tqe_grade), text_size=_szCmd)
         table.cell(cmd, 0, 9, "Risk Level", text_color=#00ffcc, text_size=_szCmd)
