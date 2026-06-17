@@ -5834,36 +5834,44 @@ var string GRP_V72_TQE  = "V72 — Trade Qualification (TQE)"
 var string GRP_V72_TE   = "V72 — Target / Invalidation"
 var string GRP_V72_DOE  = "V72 — Decision Output (DOE)"
 
-// ── All V72 inputs (global scope — required) ─────────────────────────────────
-bool   dashAdvancedMode = input.bool(false, "Advanced Mode (Diagnostic Depth)", group=GRP_V72_DASH)
-bool   showV72Command   = input.bool(true,  "Show V72 COMMAND Panel",           group=GRP_V72_DASH)
-float  frzProximityATR  = input.float(2.0,  "FRZ: Proximity Threshold (ATR)",   group=GRP_V72_TQE, minval=0.1, step=0.1)
-float  frzConvergenceATR= input.float(0.5,  "FRZ: Attractor Convergence (ATR)", group=GRP_V72_TQE, minval=0.1, step=0.1)
-float  rieW_decay  = input.float(0.35, "RIE: Decay Weight",       group=GRP_V72_RIE, minval=0.0, maxval=1.0, step=0.05)
-float  rieW_absorb = input.float(0.30, "RIE: Absorption Weight",  group=GRP_V72_RIE, minval=0.0, maxval=1.0, step=0.05)
-float  rieW_convex = input.float(0.20, "RIE: Convexity Weight",   group=GRP_V72_RIE, minval=0.0, maxval=1.0, step=0.05)
-float  rieW_stabExp= input.float(0.40, "RIE: Stability Expansion Weight",  group=GRP_V72_RIE, minval=0.0, maxval=1.0, step=0.05)
-float  rieW_press  = input.float(0.50, "RIE: Transfer Pressure Weight",    group=GRP_V72_RIE, minval=0.0, maxval=1.0, step=0.05)
-float  rieW_stabInv= input.float(0.30, "RIE: Transfer Instability Weight", group=GRP_V72_RIE, minval=0.0, maxval=1.0, step=0.05)
+// ── All V72 inputs (global scope — required). Renamed to in_* and bundled into
+//    arrays below so f_v72_run references arrays (1 external element each) rather
+//    than ~27 inputs directly, staying within the per-function limit (CE10116). ─
+bool   in_dashAdvancedMode = input.bool(false, "Advanced Mode (Diagnostic Depth)", group=GRP_V72_DASH)
+bool   in_showV72Command   = input.bool(true,  "Show V72 COMMAND Panel",           group=GRP_V72_DASH)
+float  in_frzProximityATR  = input.float(2.0,  "FRZ: Proximity Threshold (ATR)",   group=GRP_V72_TQE, minval=0.1, step=0.1)
+float  in_frzConvergenceATR= input.float(0.5,  "FRZ: Attractor Convergence (ATR)", group=GRP_V72_TQE, minval=0.1, step=0.1)
+float  in_rieW_decay  = input.float(0.35, "RIE: Decay Weight",       group=GRP_V72_RIE, minval=0.0, maxval=1.0, step=0.05)
+float  in_rieW_absorb = input.float(0.30, "RIE: Absorption Weight",  group=GRP_V72_RIE, minval=0.0, maxval=1.0, step=0.05)
+float  in_rieW_convex = input.float(0.20, "RIE: Convexity Weight",   group=GRP_V72_RIE, minval=0.0, maxval=1.0, step=0.05)
+float  in_rieW_stabExp= input.float(0.40, "RIE: Stability Expansion Weight",  group=GRP_V72_RIE, minval=0.0, maxval=1.0, step=0.05)
+float  in_rieW_press  = input.float(0.50, "RIE: Transfer Pressure Weight",    group=GRP_V72_RIE, minval=0.0, maxval=1.0, step=0.05)
+float  in_rieW_stabInv= input.float(0.30, "RIE: Transfer Instability Weight", group=GRP_V72_RIE, minval=0.0, maxval=1.0, step=0.05)
 string mce_tf3 = input.timeframe("240", "MCE: Timeframe 3 (HTF)", group=GRP_V72_MCE)
 string mce_tf4 = input.timeframe("D",   "MCE: Timeframe 4 (HTF)", group=GRP_V72_MCE)
-float  invOriginBuffer = input.float(0.25, "IE2: Origin Stop Buffer (ATR)", group=GRP_V72_TE, minval=0.0, step=0.05)
-float  invZoneBuffer   = input.float(0.10, "IE2: Zone Stop Buffer (ATR)",   group=GRP_V72_TE, minval=0.0, step=0.05)
-float  teTertiaryATR   = input.float(2.0,  "TE: Tertiary Extension (ATR)",  group=GRP_V72_TE, minval=0.1, step=0.1)
-float  rrMinimum       = input.float(1.5,  "TE: Minimum R:R for TP1 Gate",  group=GRP_V72_TE, minval=0.5, step=0.1)
-bool   teTertiaryOn    = input.bool(false, "TE: Enable Tertiary TP3 (research)", group=GRP_V72_TE)
-float  tqeW_ie1a = input.float(0.25, "TQE: IE1A Confidence Weight",   group=GRP_V72_TQE, minval=0.0, maxval=1.0, step=0.01)
-float  tqeW_erf  = input.float(0.15, "TQE: ERF (pure) Weight",        group=GRP_V72_TQE, minval=0.0, maxval=1.0, step=0.01)
-float  tqeW_frz  = input.float(0.15, "TQE: FRZ Quality Weight",       group=GRP_V72_TQE, minval=0.0, maxval=1.0, step=0.01)
-float  tqeW_mce  = input.float(0.20, "TQE: MCE HTF Alignment Weight", group=GRP_V72_TQE, minval=0.0, maxval=1.0, step=0.01)
-float  tqeW_re   = input.float(0.10, "TQE: RE Completion Weight",     group=GRP_V72_TQE, minval=0.0, maxval=1.0, step=0.01)
-float  tqeW_liq  = input.float(0.15, "TQE: Liquidity Quality Weight", group=GRP_V72_TQE, minval=0.0, maxval=1.0, step=0.01)
-float  tqeGradeA1= input.float(85.0, "TQE: A+ Threshold", group=GRP_V72_TQE, minval=0.0, maxval=100.0, step=1.0)
-float  tqeGradeA = input.float(72.0, "TQE: A Threshold",  group=GRP_V72_TQE, minval=0.0, maxval=100.0, step=1.0)
-float  tqeGradeB = input.float(58.0, "TQE: B Threshold",  group=GRP_V72_TQE, minval=0.0, maxval=100.0, step=1.0)
-float  tqeGradeC = input.float(42.0, "TQE: C Threshold",  group=GRP_V72_TQE, minval=0.0, maxval=100.0, step=1.0)
-int    doeCapBase = input.int(88, "DOE: Confidence Cap (base)",        group=GRP_V72_DOE, minval=50, maxval=100)
-int    doeCapConv = input.int(95, "DOE: Confidence Cap (convergence)", group=GRP_V72_DOE, minval=50, maxval=100)
+float  in_invOriginBuffer = input.float(0.25, "IE2: Origin Stop Buffer (ATR)", group=GRP_V72_TE, minval=0.0, step=0.05)
+float  in_invZoneBuffer   = input.float(0.10, "IE2: Zone Stop Buffer (ATR)",   group=GRP_V72_TE, minval=0.0, step=0.05)
+float  in_teTertiaryATR   = input.float(2.0,  "TE: Tertiary Extension (ATR)",  group=GRP_V72_TE, minval=0.1, step=0.1)
+float  in_rrMinimum       = input.float(1.5,  "TE: Minimum R:R for TP1 Gate",  group=GRP_V72_TE, minval=0.5, step=0.1)
+bool   in_teTertiaryOn    = input.bool(false, "TE: Enable Tertiary TP3 (research)", group=GRP_V72_TE)
+float  in_tqeW_ie1a = input.float(0.25, "TQE: IE1A Confidence Weight",   group=GRP_V72_TQE, minval=0.0, maxval=1.0, step=0.01)
+float  in_tqeW_erf  = input.float(0.15, "TQE: ERF (pure) Weight",        group=GRP_V72_TQE, minval=0.0, maxval=1.0, step=0.01)
+float  in_tqeW_frz  = input.float(0.15, "TQE: FRZ Quality Weight",       group=GRP_V72_TQE, minval=0.0, maxval=1.0, step=0.01)
+float  in_tqeW_mce  = input.float(0.20, "TQE: MCE HTF Alignment Weight", group=GRP_V72_TQE, minval=0.0, maxval=1.0, step=0.01)
+float  in_tqeW_re   = input.float(0.10, "TQE: RE Completion Weight",     group=GRP_V72_TQE, minval=0.0, maxval=1.0, step=0.01)
+float  in_tqeW_liq  = input.float(0.15, "TQE: Liquidity Quality Weight", group=GRP_V72_TQE, minval=0.0, maxval=1.0, step=0.01)
+float  in_tqeGradeA1= input.float(85.0, "TQE: A+ Threshold", group=GRP_V72_TQE, minval=0.0, maxval=100.0, step=1.0)
+float  in_tqeGradeA = input.float(72.0, "TQE: A Threshold",  group=GRP_V72_TQE, minval=0.0, maxval=100.0, step=1.0)
+float  in_tqeGradeB = input.float(58.0, "TQE: B Threshold",  group=GRP_V72_TQE, minval=0.0, maxval=100.0, step=1.0)
+float  in_tqeGradeC = input.float(42.0, "TQE: C Threshold",  group=GRP_V72_TQE, minval=0.0, maxval=100.0, step=1.0)
+int    in_doeCapBase = input.int(88, "DOE: Confidence Cap (base)",        group=GRP_V72_DOE, minval=50, maxval=100)
+int    in_doeCapConv = input.int(95, "DOE: Confidence Cap (convergence)", group=GRP_V72_DOE, minval=50, maxval=100)
+
+// Bundle tunables into arrays (each array counts as a single external element).
+array<float> v72F = array.from(in_frzProximityATR, in_frzConvergenceATR, in_rieW_decay, in_rieW_absorb, in_rieW_convex, in_rieW_stabExp, in_rieW_press, in_rieW_stabInv, in_invOriginBuffer, in_invZoneBuffer, in_teTertiaryATR, in_rrMinimum, in_tqeW_ie1a, in_tqeW_erf, in_tqeW_frz, in_tqeW_mce, in_tqeW_re, in_tqeW_liq, in_tqeGradeA1, in_tqeGradeA, in_tqeGradeB, in_tqeGradeC)
+array<int>   v72I = array.from(in_doeCapBase, in_doeCapConv)
+array<bool>  v72B = array.from(in_teTertiaryOn, in_dashAdvancedMode, in_showV72Command)
+string       v72Sz = dashTextSize == "tiny" ? size.tiny : dashTextSize == "normal" ? size.normal : size.small
 
 // ── MCE TF3/TF4 direction reads (single-value to minimize external elements) ──
 // CE limit fix: each request.*() return value counts toward EVERY function's
@@ -5898,7 +5906,36 @@ f_v72_riskCol(string _r)   => _r == "LOW" ? color.lime : _r == "MEDIUM" ? color.
 // Called once per bar (below). Reads global V71 vars + inputs; _dir3/_dir4 are the
 // TF3/TF4 structural directions from the security reads above.
 // ═══════════════════════════════════════════════════════════════════════════════
-f_v72_run(int _dir3, int _dir4) =>
+f_v72_run(int _dir3, int _dir4, array<float> _cf, array<int> _ci, array<bool> _cb, string _szCmd) =>
+    // Unpack bundled tunables into local names so the engine body below is
+    // unchanged. These locals are NOT globals, so there is no shadowing.
+    float frzProximityATR   = array.get(_cf, 0)
+    float frzConvergenceATR = array.get(_cf, 1)
+    float rieW_decay        = array.get(_cf, 2)
+    float rieW_absorb       = array.get(_cf, 3)
+    float rieW_convex       = array.get(_cf, 4)
+    float rieW_stabExp      = array.get(_cf, 5)
+    float rieW_press        = array.get(_cf, 6)
+    float rieW_stabInv      = array.get(_cf, 7)
+    float invOriginBuffer   = array.get(_cf, 8)
+    float invZoneBuffer     = array.get(_cf, 9)
+    float teTertiaryATR     = array.get(_cf, 10)
+    float rrMinimum         = array.get(_cf, 11)
+    float tqeW_ie1a         = array.get(_cf, 12)
+    float tqeW_erf          = array.get(_cf, 13)
+    float tqeW_frz          = array.get(_cf, 14)
+    float tqeW_mce          = array.get(_cf, 15)
+    float tqeW_re           = array.get(_cf, 16)
+    float tqeW_liq          = array.get(_cf, 17)
+    float tqeGradeA1        = array.get(_cf, 18)
+    float tqeGradeA         = array.get(_cf, 19)
+    float tqeGradeB         = array.get(_cf, 20)
+    float tqeGradeC         = array.get(_cf, 21)
+    int   doeCapBase        = array.get(_ci, 0)
+    int   doeCapConv        = array.get(_ci, 1)
+    bool  teTertiaryOn      = array.get(_cb, 0)
+    bool  dashAdvancedMode  = array.get(_cb, 1)
+    bool  showV72Command    = array.get(_cb, 2)
     // ── V72.1 FRZ best-zone index resolution (C1) ────────────────────────────
     int   v72_frzBestIdx = -1
     int   v72_frzBestSc  = -1
@@ -6184,7 +6221,6 @@ f_v72_run(int _dir3, int _dir4) =>
     string trc_deliveryChain = "Delivery#" + str.tostring(dwr_activeId)
 
     // ── V72.12 Dashboards ────────────────────────────────────────────────────
-    string _szCmd = dashTextSize == "tiny" ? size.tiny : dashTextSize == "normal" ? size.normal : size.small
     if barstate.islast and showTable and showV72Command
         var table cmd = table.new(position.middle_right, 2, 22, bgcolor=color.new(#05050f, 0), border_color=color.new(#00ffcc, 40), border_width=1, frame_color=color.new(#00ffcc, 10), frame_width=1)
         table.cell(cmd, 0, 0, "V72 COMMAND", text_color=color.white, bgcolor=color.new(#0a0a30, 0), text_size=_szCmd)
@@ -6272,4 +6308,4 @@ f_v72_run(int _dir3, int _dir4) =>
     0
 
 // ── Run the V72 engine once per bar ──────────────────────────────────────────
-f_v72_run(nz(dir_tf3_raw), nz(dir_tf4_raw))
+f_v72_run(nz(dir_tf3_raw), nz(dir_tf4_raw), v72F, v72I, v72B, v72Sz)
